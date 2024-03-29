@@ -391,7 +391,7 @@ pub struct TypeDefinition {
     size: i32,
     v_table: usize,
     v_table_size: i32,
-    type_info: usize,
+    type_info: TypeInfo,
     class_kind: u32,
 }
 
@@ -438,7 +438,10 @@ impl TypeDefinition {
             0
         };
 
-        let type_info = 0;
+        let type_info = TypeInfo::new(
+            definition_addr + crate::constants::TYPE_DEFINITION_BY_VAL_ARG as usize,
+            reader,
+        );
         let class_kind = 0;
 
         TypeDefinition {
@@ -451,6 +454,33 @@ impl TypeDefinition {
             v_table_size,
             type_info,
             class_kind,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct TypeInfo {
+    data: usize,
+    attrs: u32,
+    is_static: bool,
+    is_const: bool,
+    type_code: u32,
+}
+
+impl TypeInfo {
+    fn new(addr: usize, reader: &MonoReader) -> Self {
+        let data = reader.read_ptr(addr);
+        let attrs = reader.read_u32(addr + crate::constants::SIZE_OF_PTR);
+        let is_static = (attrs & 0x1) != 0;
+        let is_const = (attrs & 0x4) != 0;
+        let type_code = 0xff & (attrs >> 16);
+
+        TypeInfo {
+            data,
+            attrs,
+            is_static,
+            is_const,
+            type_code,
         }
     }
 }
