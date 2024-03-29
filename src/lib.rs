@@ -1,3 +1,6 @@
+use core::fmt;
+use core::fmt::Debug;
+use core::fmt::Formatter;
 use proc_mem::{ProcMemError, Process};
 use process_memory::{DataMember, Memory, ProcessHandle, TryIntoProcessHandle};
 
@@ -94,15 +97,19 @@ impl MonoReader {
                     definition + crate::constants::TYPE_DEFINITION_NEXT_CLASS_CACHE as usize,
                 );
                 if definition != 0 {
-                    // let ptr = self.read_ptr(definition + crate::constants::TYPE_DEFINITION_NAME as usize);
-                    // let name = self.read_ascii_string(ptr);
-                    // println!("Name: {:?}", name);
-
                     let type_def = TypeDefinition::new(definition, self);
                     self.type_definitions
                         .push((definition, type_def.clone() as TypeDefinition));
                     let name = type_def.name.clone();
-                    println!("Name: {:?}", name);
+
+                    if name == "PAPA" {
+                        println!("definition - {:?}", definition);
+                        println!("size - {:?}", type_def.size);
+                        println!("type_info.class_kind - {:?}", type_def.class_kind);
+                        println!("type_info.data - {:?}", type_def.type_info.data);
+                        println!("type_info.attrs - {:?}", type_def.type_info.attrs);
+                        println!("type_info.type_code - {:?}", type_def.type_info.type_code);
+                    }
                 }
                 // add definition
             }
@@ -378,6 +385,41 @@ impl MonoReader {
 }
 
 #[derive(Clone)]
+enum MonoClassKind {
+    Def = 1,
+    GTg = 2,
+    GInst = 3,
+    GParam = 4,
+    Array = 5,
+    Pointer = 6,
+}
+
+impl Debug for MonoClassKind {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            MonoClassKind::Def => write!(f, "Def"),
+            MonoClassKind::GTg => write!(f, "GTg"),
+            MonoClassKind::GInst => write!(f, "GInst"),
+            MonoClassKind::GParam => write!(f, "GParam"),
+            MonoClassKind::Array => write!(f, "Array"),
+            MonoClassKind::Pointer => write!(f, "Pointer"),
+        }
+    }
+}
+
+fn match_class_kind(value: u8) -> MonoClassKind {
+    match value {
+        1 => MonoClassKind::Def,
+        2 => MonoClassKind::GTg,
+        3 => MonoClassKind::GInst,
+        4 => MonoClassKind::GParam,
+        5 => MonoClassKind::Array,
+        6 => MonoClassKind::Pointer,
+        _ => MonoClassKind::Def,
+    }
+}
+
+#[derive(Clone)]
 pub struct TypeDefinition {
     bit_fields: u32,
     field_count: i32,
@@ -392,7 +434,7 @@ pub struct TypeDefinition {
     v_table: usize,
     v_table_size: i32,
     type_info: TypeInfo,
-    class_kind: u32,
+    class_kind: MonoClassKind,
 }
 
 impl TypeDefinition {
@@ -442,7 +484,10 @@ impl TypeDefinition {
             definition_addr + crate::constants::TYPE_DEFINITION_BY_VAL_ARG as usize,
             reader,
         );
-        let class_kind = 0;
+
+        let class_kind_value =
+            reader.read_u8(definition_addr + crate::constants::TYPE_DEFINITION_CLASS_KIND as usize);
+        let class_kind = match_class_kind(class_kind_value);
 
         TypeDefinition {
             bit_fields,
