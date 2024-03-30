@@ -13,7 +13,6 @@ pub struct MonoReader {
     handle: ProcessHandle,
     mono_root_domain: usize,
     assembly_image_address: usize,
-    type_definitions: Vec<(usize, TypeDefinition)>,
 }
 
 impl MonoReader {
@@ -24,10 +23,8 @@ impl MonoReader {
             handle,
             mono_root_domain: 0,
             assembly_image_address: 0,
-            type_definitions: Vec::new(),
         }
     }
-
     pub fn read_mono_root_domain(&mut self) -> usize {
         let mtga_process = match Process::with_pid(*&self.pid) {
             Ok(process) => Some(process),
@@ -63,7 +60,7 @@ impl MonoReader {
         self.mono_root_domain
     }
 
-    pub fn create_type_definitions(&mut self) {
+    pub fn create_type_definitions(&mut self) -> Vec<usize> {
         // let type_definitions = Vec::new();
 
         let class_cache_size = self.read_u32(
@@ -77,15 +74,17 @@ impl MonoReader {
                     as usize,
         );
 
-        println!("Class cache size: {:?}", class_cache_size);
+        // println!("Class cache size: {:?}", class_cache_size);
 
-        println!("Class cache table array: {:?}", class_cache_table_array);
+        // println!("Class cache table array: {:?}", class_cache_table_array);
 
         let mut table_item = 0;
-        println!(
-            "Class cache size: {:?}",
-            class_cache_size * crate::constants::SIZE_OF_PTR as u32
-        );
+        // println!(
+        //     "Class cache size: {:?}",
+        //     class_cache_size * crate::constants::SIZE_OF_PTR as u32
+        // );
+
+        let mut type_defs: Vec<usize> = Vec::new();
 
         while table_item < (class_cache_size * crate::constants::SIZE_OF_PTR as u32) {
             //
@@ -97,25 +96,15 @@ impl MonoReader {
                     definition + crate::constants::TYPE_DEFINITION_NEXT_CLASS_CACHE as usize,
                 );
                 if definition != 0 {
-                    let type_def = TypeDefinition::new(definition, self);
-                    self.type_definitions
-                        .push((definition, type_def.clone() as TypeDefinition));
-                    let name = type_def.name.clone();
-
-                    if name == "PAPA" {
-                        println!("definition - {:?}", definition);
-                        println!("size - {:?}", type_def.size);
-                        println!("type_info.class_kind - {:?}", type_def.class_kind);
-                        println!("type_info.data - {:?}", type_def.type_info.data);
-                        println!("type_info.attrs - {:?}", type_def.type_info.attrs);
-                        println!("type_info.type_code - {:?}", type_def.type_info.type_code);
-                    }
+                    // add its address to the list
+                    type_defs.push(definition);
                 }
-                // add definition
             }
 
             table_item += crate::constants::SIZE_OF_PTR as u32;
         }
+
+        return type_defs;
     }
 
     pub fn read_assembly_image(&mut self) -> usize {
@@ -385,7 +374,7 @@ impl MonoReader {
 }
 
 #[derive(Clone)]
-enum MonoClassKind {
+pub enum MonoClassKind {
     Def = 1,
     GTg = 2,
     GInst = 3,
@@ -419,26 +408,27 @@ fn match_class_kind(value: u8) -> MonoClassKind {
     }
 }
 
-#[derive(Clone)]
-pub struct TypeDefinition {
-    bit_fields: u32,
-    field_count: i32,
+pub struct TypeDefinition<'a> {
+    reader: &'a MonoReader,
+    address: usize,
+    pub bit_fields: u32,
+    pub field_count: i32,
     // lazy_parent: usize,
     // lazy_nested_in: usize,
     // lazy_full_name: usize,
     // lazy_fields: usize,
     // lazy_generic: usize,
-    name: String,
-    namespace_name: String,
-    size: i32,
-    v_table: usize,
-    v_table_size: i32,
-    type_info: TypeInfo,
-    class_kind: MonoClassKind,
+    pub name: String,
+    pub namespace_name: String,
+    pub size: i32,
+    pub v_table: usize,
+    pub v_table_size: i32,
+    pub type_info: TypeInfo,
+    pub class_kind: MonoClassKind,
 }
 
-impl TypeDefinition {
-    pub fn new(definition_addr: usize, reader: &MonoReader) -> Self {
+impl<'a> TypeDefinition<'a> {
+    pub fn new(definition_addr: usize, reader: &'a MonoReader) -> Self {
         let bit_fields = reader
             .read_u32(definition_addr + crate::constants::TYPE_DEFINITION_BIT_FIELDS as usize);
 
@@ -482,7 +472,7 @@ impl TypeDefinition {
 
         let type_info = TypeInfo::new(
             definition_addr + crate::constants::TYPE_DEFINITION_BY_VAL_ARG as usize,
-            reader,
+            &reader,
         );
 
         let class_kind_value =
@@ -490,6 +480,8 @@ impl TypeDefinition {
         let class_kind = match_class_kind(class_kind_value);
 
         TypeDefinition {
+            address: definition_addr,
+            reader,
             bit_fields,
             field_count,
             name,
@@ -501,15 +493,40 @@ impl TypeDefinition {
             class_kind,
         }
     }
+
+    pub fn get_fields(&self) -> Vec<usize> {
+        let first_field = self
+            .reader
+            .read_ptr(self.address + crate::constants::TYPE_DEFINITION_FIELDS as usize);
+
+        let mut fields = Vec::new();
+
+        if first_field == 0 {
+            return fields;
+        } else {
+            for field_index in 0..self.field_count {
+                let field = first_field
+                    + (field_index as usize
+                        * crate::constants::TYPE_DEFINITION_FIELD_SIZE as usize);
+                let ptr = self.reader.read_ptr(field);
+                if ptr == 0 {
+                    continue;
+                }
+                fields.push(ptr);
+            }
+        }
+
+        return fields;
+    }
 }
 
 #[derive(Clone)]
 pub struct TypeInfo {
-    data: usize,
-    attrs: u32,
-    is_static: bool,
-    is_const: bool,
-    type_code: u32,
+    pub data: usize,
+    pub attrs: u32,
+    pub is_static: bool,
+    pub is_const: bool,
+    pub type_code: u32,
 }
 
 impl TypeInfo {

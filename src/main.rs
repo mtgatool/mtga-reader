@@ -1,4 +1,4 @@
-use mtga_reader::MonoReader;
+use mtga_reader::{MonoReader, TypeDefinition};
 use sysinfo::{Pid as SysPid, System};
 
 fn find_pid_by_name(name: &str) -> Option<SysPid> {
@@ -26,6 +26,25 @@ fn main() {
 
         mono_reader.read_mono_root_domain();
         mono_reader.read_assembly_image();
-        mono_reader.create_type_definitions();
+
+        let mut type_defs: Vec<(usize, TypeDefinition)> = Vec::new();
+        let defs = mono_reader.create_type_definitions();
+
+        let vec_size = defs.len();
+        for i in 0..vec_size {
+            let offset = i * 8;
+            let definition = defs.get(i).unwrap();
+            let typedef = TypeDefinition::new(definition.clone(), &mono_reader);
+
+            if typedef.name == "PAPA" {
+                println!("PAPA type: {}", typedef.type_info.type_code);
+                let fields = typedef.get_fields();
+                for field in fields {
+                    println!("Field: {}", field);
+                }
+            }
+
+            type_defs.push((offset, typedef));
+        }
     });
 }
