@@ -1,4 +1,4 @@
-use mtga_reader::{MonoReader, TypeDefinition};
+use mtga_reader::{FieldDefinition, MonoReader, TypeDefinition};
 use sysinfo::{Pid as SysPid, System};
 
 fn find_pid_by_name(name: &str) -> Option<SysPid> {
@@ -36,11 +36,20 @@ fn main() {
             let definition = defs.get(i).unwrap();
             let typedef = TypeDefinition::new(definition.clone(), &mono_reader);
 
+            // if typedef.type_info.is_const {
+            //     println!("type name: {}", typedef.name);
+            //     println!("type code: {}", typedef.type_info.type_code);
+            // }
             if typedef.name == "PAPA" {
+                println!("PAPA address: {}", definition);
                 println!("PAPA type: {}", typedef.type_info.type_code);
+                println!("PAPA attrs: {}", typedef.type_info.attrs);
+                println!("PAPA field count: {}", typedef.field_count);
                 let fields = typedef.get_fields();
                 for field in fields {
-                    println!("Field: {}", field);
+                    let field_def = FieldDefinition::new(field, &mono_reader);
+                    println!("Field addr: {}", field);
+                    println!("Field name: {}", field_def.name);
                 }
             }
 

@@ -512,7 +512,7 @@ impl<'a> TypeDefinition<'a> {
                 if ptr == 0 {
                     continue;
                 }
-                fields.push(ptr);
+                fields.push(field);
             }
         }
 
@@ -533,8 +533,8 @@ impl TypeInfo {
     fn new(addr: usize, reader: &MonoReader) -> Self {
         let data = reader.read_ptr(addr);
         let attrs = reader.read_u32(addr + crate::constants::SIZE_OF_PTR);
-        let is_static = (attrs & 0x1) != 0;
-        let is_const = (attrs & 0x4) != 0;
+        let is_static = (attrs & 0x10) == 0x10;
+        let is_const = (attrs & 0x40) == 0x40;
         let type_code = 0xff & (attrs >> 16);
 
         TypeInfo {
@@ -543,6 +543,28 @@ impl TypeInfo {
             is_static,
             is_const,
             type_code,
+        }
+    }
+}
+
+pub struct FieldDefinition {
+    pub type_info: TypeInfo,
+    pub name: String,
+    pub offset: i32,
+}
+
+impl FieldDefinition {
+    pub fn new(addr: usize, reader: &MonoReader) -> Self {
+        let type_info = TypeInfo::new(addr, reader);
+
+        let name = reader.read_ptr_ascii_string(addr + crate::constants::SIZE_OF_PTR as usize);
+
+        let offset = reader.read_i32(addr + crate::constants::SIZE_OF_PTR * 3 as usize);
+
+        FieldDefinition {
+            type_info,
+            name,
+            offset,
         }
     }
 }
