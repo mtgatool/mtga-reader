@@ -3,6 +3,7 @@ use core::fmt::Debug;
 use core::fmt::Formatter;
 use proc_mem::{ProcMemError, Process};
 use process_memory::{DataMember, Memory, ProcessHandle, TryIntoProcessHandle};
+use std::fmt::Display;
 
 pub mod constants;
 
@@ -408,6 +409,119 @@ fn match_class_kind(value: u8) -> MonoClassKind {
     }
 }
 
+pub enum TypeCode {
+    END = 0x00, /* End of List */
+    VOID = 0x01,
+    BOOLEAN = 0x02,
+
+    // [Description("char")]
+    CHAR = 0x03,
+
+    // [Description("byte")]
+    I1 = 0x04,
+
+    // [Description("sbyte")]
+    U1 = 0x05,
+
+    // [Description("short")]
+    I2 = 0x06,
+
+    // [Description("ushort")]
+    U2 = 0x07,
+
+    // [Description("int")]
+    I4 = 0x08,
+
+    // [Description("uint")]
+    U4 = 0x09,
+
+    // [Description("long")]
+    I8 = 0x0a,
+
+    // [Description("ulong")]
+    U8 = 0x0b,
+
+    // [Description("float")]
+    R4 = 0x0c,
+
+    // [Description("double")]
+    R8 = 0x0d,
+
+    // [Description("string")]
+    STRING = 0x0e,
+
+    PTR = 0x0f,         /* arg: <type> token */
+    BYREF = 0x10,       /* arg: <type> token */
+    VALUETYPE = 0x11,   /* arg: <type> token */
+    CLASS = 0x12,       /* arg: <type> token */
+    VAR = 0x13,         /* number */
+    ARRAY = 0x14,       /* type, rank, boundsCount, bound1, loCount, lo1 */
+    GENERICINST = 0x15, /* <type> <type-arg-count> <type-1> \x{2026} <type-n> */
+    TYPEDBYREF = 0x16,
+
+    // [Description("int")]
+    I = 0x18,
+
+    // [Description("uint")]
+    U = 0x19,
+
+    FNPTR = 0x1b, /* arg: full method signature */
+    OBJECT = 0x1c,
+    SZARRAY = 0x1d,   /* 0-based one-dim-array */
+    MVAR = 0x1e,      /* number */
+    CMOD_REQD = 0x1f, /* arg: typedef or typeref token */
+    CMOD_OPT = 0x20,  /* optional arg: typedef or typref token */
+    INTERNAL = 0x21,  /* CLR internal type */
+    MODIFIER = 0x40,  /* Or with the following types */
+    SENTINEL = 0x41,  /* Sentinel for varargs method signature */
+    PINNED = 0x45,    /* Local var that points to pinned object */
+    ENUM = 0x55,      /* an enumeration */
+}
+
+impl Display for TypeCode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            TypeCode::END => write!(f, "END"),
+            TypeCode::VOID => write!(f, "VOID"),
+            TypeCode::BOOLEAN => write!(f, "BOOLEAN"),
+            TypeCode::CHAR => write!(f, "CHAR"),
+            TypeCode::I1 => write!(f, "I1"),
+            TypeCode::U1 => write!(f, "U1"),
+            TypeCode::I2 => write!(f, "I2"),
+            TypeCode::U2 => write!(f, "U2"),
+            TypeCode::I4 => write!(f, "I4"),
+            TypeCode::U4 => write!(f, "U4"),
+            TypeCode::I8 => write!(f, "I8"),
+            TypeCode::U8 => write!(f, "U8"),
+            TypeCode::R4 => write!(f, "R4"),
+            TypeCode::R8 => write!(f, "R8"),
+            TypeCode::STRING => write!(f, "STRING"),
+            TypeCode::PTR => write!(f, "PTR"),
+            TypeCode::BYREF => write!(f, "BYREF"),
+            TypeCode::VALUETYPE => write!(f, "VALUETYPE"),
+            TypeCode::CLASS => write!(f, "CLASS"),
+            TypeCode::VAR => write!(f, "VAR"),
+            TypeCode::ARRAY => write!(f, "ARRAY"),
+            TypeCode::GENERICINST => write!(f, "GENERICINST"),
+            TypeCode::TYPEDBYREF => write!(f, "TYPEDBYREF"),
+            TypeCode::I => write!(f, "I"),
+            TypeCode::U => write!(f, "U"),
+            TypeCode::FNPTR => write!(f, "FNPTR"),
+            TypeCode::OBJECT => write!(f, "OBJECT"),
+            TypeCode::SZARRAY => write!(f, "SZARRAY"),
+            TypeCode::MVAR => write!(f, "MVAR"),
+            TypeCode::CMOD_REQD => write!(f, "CMOD_REQD"),
+            TypeCode::CMOD_OPT => write!(f, "CMOD_OPT"),
+            TypeCode::INTERNAL => write!(f, "INTERNAL"),
+            TypeCode::MODIFIER => write!(f, "MODIFIER"),
+            TypeCode::SENTINEL => write!(f, "SENTINEL"),
+            TypeCode::PINNED => write!(f, "PINNED"),
+            TypeCode::ENUM => write!(f, "ENUM"),
+            _ => write!(f, "UNKNOWN"),
+        }
+    }
+}
+
 pub struct TypeDefinition<'a> {
     reader: &'a MonoReader,
     address: usize,
@@ -434,12 +548,6 @@ impl<'a> TypeDefinition<'a> {
 
         let field_count = reader
             .read_i32(definition_addr + crate::constants::TYPE_DEFINITION_FIELD_COUNT as usize);
-
-        // let lazy_parent = 0;
-        // let lazy_nested_in = 0;
-        // let lazy_full_name = 0;
-        // let lazy_fields = 0;
-        // let lazy_generic = 0;
 
         let name = reader.read_ptr_ascii_string(
             definition_addr + crate::constants::TYPE_DEFINITION_NAME as usize,
@@ -545,6 +653,49 @@ impl TypeInfo {
             type_code,
         }
     }
+
+    pub fn code(self) -> TypeCode {
+        // return the appropiate TypeCode enum based on self.type_code
+        match self.type_code {
+            0x00 => TypeCode::END,
+            0x01 => TypeCode::VOID,
+            0x02 => TypeCode::BOOLEAN,
+            0x03 => TypeCode::CHAR,
+            0x04 => TypeCode::I1,
+            0x05 => TypeCode::U1,
+            0x06 => TypeCode::I2,
+            0x07 => TypeCode::U2,
+            0x08 => TypeCode::I4,
+            0x09 => TypeCode::U4,
+            0x0a => TypeCode::I8,
+            0x0b => TypeCode::U8,
+            0x0c => TypeCode::R4,
+            0x0d => TypeCode::R8,
+            0x0e => TypeCode::STRING,
+            0x0f => TypeCode::PTR,
+            0x10 => TypeCode::BYREF,
+            0x11 => TypeCode::VALUETYPE,
+            0x12 => TypeCode::CLASS,
+            0x13 => TypeCode::VAR,
+            0x14 => TypeCode::ARRAY,
+            0x15 => TypeCode::GENERICINST,
+            0x16 => TypeCode::TYPEDBYREF,
+            0x18 => TypeCode::I,
+            0x19 => TypeCode::U,
+            0x1b => TypeCode::FNPTR,
+            0x1c => TypeCode::OBJECT,
+            0x1d => TypeCode::SZARRAY,
+            0x1e => TypeCode::MVAR,
+            0x1f => TypeCode::CMOD_REQD,
+            0x20 => TypeCode::CMOD_OPT,
+            0x21 => TypeCode::INTERNAL,
+            0x40 => TypeCode::MODIFIER,
+            0x41 => TypeCode::SENTINEL,
+            0x45 => TypeCode::PINNED,
+            0x55 => TypeCode::ENUM,
+            _ => TypeCode::END,
+        }
+    }
 }
 
 pub struct FieldDefinition {
@@ -555,7 +706,8 @@ pub struct FieldDefinition {
 
 impl FieldDefinition {
     pub fn new(addr: usize, reader: &MonoReader) -> Self {
-        let type_info = TypeInfo::new(addr, reader);
+        let type_ptr = reader.read_ptr(addr);
+        let type_info = TypeInfo::new(type_ptr, reader);
 
         let name = reader.read_ptr_ascii_string(addr + crate::constants::SIZE_OF_PTR as usize);
 

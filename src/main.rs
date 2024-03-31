@@ -36,20 +36,18 @@ fn main() {
             let definition = defs.get(i).unwrap();
             let typedef = TypeDefinition::new(definition.clone(), &mono_reader);
 
-            // if typedef.type_info.is_const {
-            //     println!("type name: {}", typedef.name);
-            //     println!("type code: {}", typedef.type_info.type_code);
-            // }
-            if typedef.name == "PAPA" {
-                println!("PAPA address: {}", definition);
-                println!("PAPA type: {}", typedef.type_info.type_code);
-                println!("PAPA attrs: {}", typedef.type_info.attrs);
-                println!("PAPA field count: {}", typedef.field_count);
+            if typedef.name == "WrapperController" {
+                println!(
+                    "namespace_name: {}, {}",
+                    typedef.namespace_name, typedef.name
+                );
+                println!("type: {}", typedef.type_info.clone().code());
+                println!("field count: {}", typedef.field_count);
                 let fields = typedef.get_fields();
                 for field in fields {
                     let field_def = FieldDefinition::new(field, &mono_reader);
-                    println!("Field addr: {}", field);
                     println!("Field name: {}", field_def.name);
+                    println!("Field type: {}", field_def.type_info.code());
                 }
             }
 
