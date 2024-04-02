@@ -56,6 +56,8 @@ fn main() {
                                 println!("_inventoryManager found");
                                 println!("field_def.type_info.addr: {}", field_def.type_info.addr);
                                 println!("field_def.offset: {}", field_def.offset);
+
+                                // if this.readXXXX(type, genericTypeArguments, address) the base offset is type_info.addr
                                 let managed = Managed::new(&mono_reader, field_def.type_info.addr);
                                 let inventory_manager = managed.read_class();
                                 inventory_manager.iter().for_each(|td| {
