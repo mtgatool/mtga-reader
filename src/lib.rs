@@ -26,6 +26,7 @@ impl MonoReader {
             assembly_image_address: 0,
         }
     }
+
     pub fn read_mono_root_domain(&mut self) -> usize {
         let mtga_process = match Process::with_pid(*&self.pid) {
             Ok(process) => Some(process),
@@ -374,6 +375,140 @@ impl MonoReader {
     }
 }
 
+pub struct Managed<'a> {
+    reader: &'a MonoReader,
+    addr: usize,
+}
+
+impl<'a> Managed<'a> {
+    pub fn new(reader: &'a MonoReader, addr: usize) -> Self {
+        Managed { reader, addr }
+    }
+
+    pub fn read_boolean(&self) -> bool {
+        self.reader.read_u8(self.addr) != 0x0
+    }
+
+    pub fn read_char(&self) -> char {
+        self.reader.read_u16(self.addr).to_string().parse().unwrap()
+    }
+
+    // read_u
+    pub fn read_u4(&self) -> u16 {
+        self.reader.read_u16(self.addr)
+    }
+
+    pub fn read_r4(&self) -> i32 {
+        self.reader.read_i32(self.addr)
+    }
+
+    pub fn read_valuetype(&self) -> i32 {
+        self.reader.read_i32(self.addr)
+    }
+
+    pub fn read_class(&self) -> Option<TypeDefinition> {
+        let ptr = self.reader.read_ptr(self.addr);
+        if ptr == 0 {
+            return None;
+        }
+        let ptr_ptr = self.reader.read_ptr(ptr);
+        return Some(TypeDefinition::new(ptr_ptr, self.reader));
+    }
+
+    // pub fn read_managed_array<T>(&self) -> Option<T>
+
+    // pub fn read_managed_struct_instance<T>(&self) -> Option<T>
+
+    // pub fn read_managed_class_instance<T>(&self) -> Option<T>
+
+    // pub fn read_managed_generic_object<T>(&self) -> Option<T>
+
+    // pub fn read_managed_var<T>(&self) -> Option<T>
+
+    // pub fn read_managed_object<T>(&self) -> Option<T>
+}
+
+// pub fn read_managed<T>(type_code: TypeCode) -> Option<T> {
+//     match type_code {
+//         // 1, b => b[0] != 0
+//         TypeCode::BOOLEAN => Some(self.read_ptr_u8(addr) != 0),
+
+//         // char -> char
+//         TypeCode::CHAR => Some(self.read_ptr_u16(addr)),
+
+//         // sizeof(byte), b => b[0]
+//         TypeCode::I1 => Some(self.read_ptr_i8(addr)),
+
+//         // sizeof(sbyte), b => unchecked((sbyte)b[0])
+//         TypeCode::U1 => Some(self.read_ptr_u8(addr)),
+
+//         // short size -> int16
+//         TypeCode::I2 => Some(self.read_ptr_i16(addr)),
+
+//         // ushort size -> uint16
+//         TypeCode::U2 => Some(self.read_ptr_u16(addr)),
+
+//         // int32
+//         TypeCode::I => Some(self.read_i32(addr)),
+//         TypeCode::I4 => Some(self.read_i32(addr)),
+
+//         // unsigned int32
+//         TypeCode::U => Some(self.read_u32(addr)),
+//         TypeCode::U4 => Some(self.read_u32(addr)),
+
+//         // char size -> int64
+//         TypeCode::I8 => Some(self.read_ptr_i64(addr)),
+
+//         // char size -> uint64
+//         TypeCode::U8 => Some(self.read_ptr_u64(addr)),
+
+//         // char size -> single
+//         TypeCode::R4 => Some(self.read_ptr_u32(addr)),
+//         // char size -> double
+//         TypeCode::R8 => Some(self.read_i64(addr)),
+
+//         TypeCode::STRING => Some(self.read_ascii_string(addr)),
+
+//         // ReadManagedArray
+//         TypeCode::SZARRAY => Some(self.read_ptr_ptr(addr)),
+
+//         // try ReadManagedStructInstance
+//         TypeCode::VALUETYPE => Some(self.read_i32(addr)),
+
+//         // ReadManagedClassInstance
+//         TypeCode::CLASS => Some(self.read_ptr_ptr(addr)),
+
+//         // ReadManagedGenericObject
+//         TypeCode::GENERICINST => Some(self.read_ptr_ptr(addr)),
+
+//         // ReadManagedGenericObject
+//         TypeCode::OBJECT => Some(self.read_ptr_ptr(addr)),
+
+//         // ReadManagedVar
+//         TypeCode::VAR => Some(self.read_ptr_i32(addr)),
+
+//         // Junk
+//         TypeCode::END => Some(0),
+//         TypeCode::VOID => Some(0),
+//         TypeCode::PTR => Some(0),
+//         TypeCode::BYREF => Some(0),
+//         TypeCode::TYPEDBYREF => Some(0),
+//         TypeCode::FNPTR => Some(0),
+//         TypeCode::CMOD_REQD => Some(0),
+//         TypeCode::CMOD_OPT => Some(0),
+//         TypeCode::INTERNAL => Some(0),
+//         TypeCode::MODIFIER => Some(0),
+//         TypeCode::SENTINEL => Some(0),
+//         TypeCode::PINNED => Some(0),
+
+//         // May need support
+//         TypeCode::ARRAY => Some(0),
+//         TypeCode::ENUM => Some(0),
+//         TypeCode::MVAR => Some(0),
+//         _ => None,
+//     }
+// }
+
 #[derive(Clone)]
 pub enum MonoClassKind {
     Def = 1,
@@ -410,7 +545,7 @@ fn match_class_kind(value: u8) -> MonoClassKind {
 }
 
 pub enum TypeCode {
-    END = 0x00, /* End of List */
+    END = 0x00,
     VOID = 0x01,
     BOOLEAN = 0x02,
 
@@ -485,16 +620,16 @@ impl Display for TypeCode {
             TypeCode::VOID => write!(f, "VOID"),
             TypeCode::BOOLEAN => write!(f, "BOOLEAN"),
             TypeCode::CHAR => write!(f, "CHAR"),
-            TypeCode::I1 => write!(f, "I1"),
-            TypeCode::U1 => write!(f, "U1"),
-            TypeCode::I2 => write!(f, "I2"),
-            TypeCode::U2 => write!(f, "U2"),
-            TypeCode::I4 => write!(f, "I4"),
-            TypeCode::U4 => write!(f, "U4"),
-            TypeCode::I8 => write!(f, "I8"),
-            TypeCode::U8 => write!(f, "U8"),
-            TypeCode::R4 => write!(f, "R4"),
-            TypeCode::R8 => write!(f, "R8"),
+            TypeCode::I1 => write!(f, "BYTE (I1)"),
+            TypeCode::U1 => write!(f, "UBYTE (U1)"),
+            TypeCode::I2 => write!(f, "SHORT (I2)"),
+            TypeCode::U2 => write!(f, "USHORT (U2)"),
+            TypeCode::I4 => write!(f, "INT (I4)"),
+            TypeCode::U4 => write!(f, "UINT (U4)"),
+            TypeCode::I8 => write!(f, "LONG (I8)"),
+            TypeCode::U8 => write!(f, "ULONG (U8)"),
+            TypeCode::R4 => write!(f, "FLOAT (R4)"),
+            TypeCode::R8 => write!(f, "DOUBLE (R8)"),
             TypeCode::STRING => write!(f, "STRING"),
             TypeCode::PTR => write!(f, "PTR"),
             TypeCode::BYREF => write!(f, "BYREF"),
@@ -504,8 +639,8 @@ impl Display for TypeCode {
             TypeCode::ARRAY => write!(f, "ARRAY"),
             TypeCode::GENERICINST => write!(f, "GENERICINST"),
             TypeCode::TYPEDBYREF => write!(f, "TYPEDBYREF"),
-            TypeCode::I => write!(f, "I"),
-            TypeCode::U => write!(f, "U"),
+            TypeCode::I => write!(f, "INT (I)"),
+            TypeCode::U => write!(f, "UINT (U)"),
             TypeCode::FNPTR => write!(f, "FNPTR"),
             TypeCode::OBJECT => write!(f, "OBJECT"),
             TypeCode::SZARRAY => write!(f, "SZARRAY"),
@@ -527,8 +662,8 @@ pub struct TypeDefinition<'a> {
     address: usize,
     pub bit_fields: u32,
     pub field_count: i32,
-    // lazy_parent: usize,
-    // lazy_nested_in: usize,
+    pub parent_addr: usize,
+    pub nested_in_addr: usize,
     // lazy_full_name: usize,
     // lazy_fields: usize,
     // lazy_generic: usize,
@@ -548,6 +683,12 @@ impl<'a> TypeDefinition<'a> {
 
         let field_count = reader
             .read_i32(definition_addr + crate::constants::TYPE_DEFINITION_FIELD_COUNT as usize);
+
+        let nested_in_addr =
+            reader.read_ptr(definition_addr + crate::constants::TYPE_DEFINITION_NESTED_IN as usize);
+
+        let parent_addr =
+            reader.read_ptr(definition_addr + crate::constants::TYPE_DEFINITION_PARENT as usize);
 
         let name = reader.read_ptr_ascii_string(
             definition_addr + crate::constants::TYPE_DEFINITION_NAME as usize,
@@ -592,6 +733,8 @@ impl<'a> TypeDefinition<'a> {
             reader,
             bit_fields,
             field_count,
+            nested_in_addr,
+            parent_addr,
             name,
             namespace_name,
             size,
@@ -630,6 +773,7 @@ impl<'a> TypeDefinition<'a> {
 
 #[derive(Clone)]
 pub struct TypeInfo {
+    pub addr: usize,
     pub data: usize,
     pub attrs: u32,
     pub is_static: bool,
@@ -646,6 +790,7 @@ impl TypeInfo {
         let type_code = 0xff & (attrs >> 16);
 
         TypeInfo {
+            addr,
             data,
             attrs,
             is_static,
