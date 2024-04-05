@@ -11,6 +11,28 @@ fn find_pid_by_name(name: &str) -> Option<SysPid> {
         .map(|(pid, _)| *pid)
 }
 
+fn get_def_by_name<'a>(
+    defs: &'a Vec<usize>,
+    name: &str,
+    mono_reader: &MonoReader,
+) -> Option<&'a usize> {
+    defs.iter().find(|def| {
+        let main_typedef = TypeDefinition::new(**def, &mono_reader);
+        main_typedef.name == name
+    })
+}
+
+fn get_def_by_addr<'a>(
+    defs: &'a Vec<usize>,
+    addr: usize,
+    mono_reader: &MonoReader,
+) -> Option<&'a usize> {
+    defs.iter().find(|def| {
+        let main_typedef = TypeDefinition::new(**def, &mono_reader);
+        main_typedef.type_info.addr == addr
+    })
+}
+
 fn main() {
     println!("Reading started...");
 
@@ -31,124 +53,101 @@ fn main() {
         let find = [
             "WrapperController",
             "<Instance>k__BackingField",
-            "<AccountClient>k__BackingField",
             "<InventoryManager>k__BackingField",
         ];
-        // let find = ["PAPA","_instance","_eventManager","_eventsServiceWrapper","_cachedEvents","_items"];
+        // let find = [
+        //     "PAPA",
+        //     "_instance",
+        //     "_eventManager",
+        //     "_eventsServiceWrapper",
+        //     "_cachedEvents",
+        //     "_items",
+        // ];
 
-        let vec_size = defs.len();
-        for i in 0..vec_size {
-            // get the type defs on the root of the assembly for the first loop
-            let definition = defs.get(i).unwrap();
-            let main_typedef = TypeDefinition::new(definition.clone(), &mono_reader);
+        // get the type defs on the root of the assembly for the first loop
+        let definition = get_def_by_name(&defs, find[0], &mono_reader)
+            .unwrap()
+            .clone();
+        let main_typedef = TypeDefinition::new(definition, &mono_reader);
 
-            if main_typedef.name == find[0] {
-                let mut definition_address = 0;
+        // Not really needed now, but this is how you can check if a class has static fields
+        // Usually we would navigate these fields and then down to the next class or static field
+        // let mut has_statics = false;
+        // let fields = main_typedef.get_fields();
+        // for field in fields {
+        //     let field_def = FieldDefinition::new(field, &mono_reader);
+        //     if field_def.type_info.is_static {
+        //         has_statics = true;
+        //     }
+        // }
+        // if has_statics {
+        //     println!("{}", main_typedef.name);
+        // }
 
-                for find in find.iter().skip(1) {
-                    println!("-----------------");
-                    println!("-----------------");
-                    let definition_addr_clone = definition_address.clone();
-                    println!("definition_address: {}", definition_addr_clone);
+        if main_typedef.name == find[0] {
+            println!("{} definition addr: {}", find[0], definition);
+            let mut definition_address = 0;
 
-                    let managed = Managed::new(&mono_reader, definition_addr_clone);
+            for find in find.iter().skip(1) {
+                println!("-----------------");
+                println!("-----------------");
+                let definition_addr_clone = definition_address.clone();
+                println!("definition_address: {}", definition_addr_clone);
 
-                    let managed_def: TypeDefinition = match definition_addr_clone {
-                        0 => TypeDefinition::new(definition.clone(), &mono_reader),
-                        _ => managed.read_class().unwrap(),
-                    };
+                let managed = Managed::new(&mono_reader, definition_addr_clone);
 
-                    println!(
-                        "In > {} - {}",
-                        managed_def.name,
-                        managed_def.type_info.clone().code()
-                    );
-                    println!("find: {}", find);
+                let managed_def: TypeDefinition = match definition_addr_clone {
+                    0 => TypeDefinition::new(definition.clone(), &mono_reader),
+                    _ => managed.read_class(),
+                };
 
-                    let fields = managed_def.get_fields();
-                    for field in fields {
-                        let field_def = FieldDefinition::new(field, &mono_reader);
-                        println!(
-                            "   - {} - {}",
-                            field_def.name,
-                            field_def.type_info.clone().code()
-                        );
-                        if &field_def.name == find {
-                            println!("FOUND at: {}", field_def.type_info.addr);
-                            definition_address = field_def.type_info.addr;
-                            break;
+                println!(
+                    "In > {} - {} - {:?}",
+                    managed_def.name,
+                    managed_def.type_info.clone().code(),
+                    managed_def.class_kind
+                );
+                println!("find: {}", find);
+
+                let fields = managed_def.get_fields();
+                for field in fields {
+                    let field_def = FieldDefinition::new(field, &mono_reader);
+                    if !field_def.type_info.is_const && field_def.type_info.is_static {
+                        println!("    {} - {}", field_def.name, field);
+                        let code = field_def.type_info.clone().code();
+                        match code {
+                            TypeCode::BOOLEAN => {
+                                let managed =
+                                    Managed::new(&mono_reader, field + field_def.offset as usize);
+                                println!("    {}", managed.read_boolean());
+                            }
+                            TypeCode::U4 => {
+                                let managed =
+                                    Managed::new(&mono_reader, field + field_def.offset as usize);
+                                println!("    {}", managed.read_u4());
+                            }
+                            TypeCode::R4 => {
+                                let managed =
+                                    Managed::new(&mono_reader, field + field_def.offset as usize);
+                                println!("    {}", managed.read_r4());
+                            }
+                            TypeCode::VALUETYPE => {
+                                let managed =
+                                    Managed::new(&mono_reader, field + field_def.offset as usize);
+                                println!("    {}", managed.read_valuetype());
+                            }
+                            _ => {
+                                //
+                            }
                         }
+                    }
+                    if &field_def.name == find {
+                        println!("FOUND at: {}", field);
+                        definition_address = field + field_def.offset as usize;
+                        // break;
                     }
                 }
             }
-
-            // if typedef.name == find[0] {
-            //     println!(
-            //         "namespace_name: {}, {}",
-            //         typedef.namespace_name, typedef.name
-            //     );
-            //     println!("type: {}", typedef.type_info.clone().code());
-            //     println!("field count: {}", typedef.field_count);
-            //     let fields = typedef.get_fields();
-
-            //     for field in fields {
-            //         let field_def = FieldDefinition::new(field, &mono_reader);
-            //         // println!("Field name: {}", field_def.name);
-            //         let code = field_def.type_info.clone().code();
-            //         // println!("Field type: {}", code);
-
-            //         match code {
-            //             TypeCode::CLASS => {
-            //                 if field_def.name == "_inventoryManager" {
-            //                     println!("_inventoryManager found");
-            //                     println!("field_def.type_info.addr: {}", field_def.type_info.addr);
-            //                     println!("field_def.offset: {}", field_def.offset);
-
-            //                     // if this.readXXXX(type, genericTypeArguments, address) the base offset is type_info.addr
-            //                     let managed = Managed::new(&mono_reader, field_def.type_info.addr);
-            //                     let inventory_manager = managed.read_class();
-            //                     inventory_manager.iter().for_each(|td| {
-            //                         let fields = td.get_fields();
-            //                         println!("field count: {}", td.field_count);
-            //                         for field in fields {
-            //                             let field_def = FieldDefinition::new(field, &mono_reader);
-            //                             println!("Field name: {}", field_def.name);
-            //                             let code = field_def.type_info.clone().code();
-            //                             println!("Field type: {}", code);
-            //                         }
-            //                     });
-            //                 }
-            //             }
-            //             _ => {}
-            //         }
-
-            // match code {
-            //     TypeCode::BOOLEAN => {
-            //         let managed =
-            //             Managed::new(&mono_reader, field + field_def.offset as usize);
-            //         println!("Field value: {}", managed.read_boolean());
-            //     }
-            //     TypeCode::U4 => {
-            //         let managed =
-            //             Managed::new(&mono_reader, field + field_def.offset as usize);
-            //         println!("Field value: {}", managed.read_u4());
-            //     }
-            //     TypeCode::R4 => {
-            //         let managed =
-            //             Managed::new(&mono_reader, field + field_def.offset as usize);
-            //         println!("Field value: {}", managed.read_r4());
-            //     }
-            //     TypeCode::VALUETYPE => {
-            //         let managed =
-            //             Managed::new(&mono_reader, field + field_def.offset as usize);
-            //         println!("Field value: {}", managed.read_valuetype());
-            //     }
-            //     _ => {}
-            // }
-            //     }
-            // }
-
-            // type_defs.push((offset, typedef));
         }
     });
 }

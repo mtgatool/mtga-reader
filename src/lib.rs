@@ -406,16 +406,69 @@ impl<'a> Managed<'a> {
         self.reader.read_i32(self.addr)
     }
 
-    pub fn read_class(&self) -> Option<TypeDefinition> {
+    // ReadManaged type CLASS
+    // ReadManaged address: 2186998511264
+    // ReadManagedClassInstance address: 2186998511264
+    // ReadManagedClassInstance ptr: 2186994410176
+    // address: 2186994410176
+    // this.Address: 2186994410176
+    // this.Image.Address): 2182574568768
+    // vtable: 2187022940944
+    // definitionAddress: 2183195717312
+    // ReadManaged type I4
+    // ReadManaged address: 2180339612944
+    // ReadManaged type BOOLEAN
+    // ReadManaged address: 2186998511272
+
+    pub fn read_class(&self) -> TypeDefinition {
+        let ptr = self.reader.read_ptr(self.addr);
+        let vtable = self.reader.read_ptr(ptr);
+        let definition_addr = self.reader.read_ptr(vtable);
+
+        println!("ptr: {:?}", ptr);
+        println!("self.addr: {:?}", self.addr);
+        println!("vtable: {:?}", vtable);
+        println!("definition_addr: {:?}", definition_addr);
+
+        return TypeDefinition::new(definition_addr, self.reader);
+    }
+
+    // pub fn read_managed_array<T>(&self) -> Option<T>
+
+    pub fn read_managed_array(&self) -> Option<Vec<i32>> {
         let ptr = self.reader.read_ptr(self.addr);
         if ptr == 0 {
             return None;
         }
-        let ptr_ptr = self.reader.read_ptr(ptr);
-        return Some(TypeDefinition::new(ptr_ptr, self.reader));
-    }
 
-    // pub fn read_managed_array<T>(&self) -> Option<T>
+        let vtable = self.reader.read_ptr(ptr);
+
+        let array_definition_ptr = self.reader.read_ptr(vtable);
+
+        let array_definition = TypeDefinition::new(array_definition_ptr, self.reader);
+
+        let element_definition =
+            TypeDefinition::new(self.reader.read_ptr(array_definition_ptr), self.reader);
+
+        let count = self
+            .reader
+            .read_i32(ptr + (crate::constants::SIZE_OF_PTR * 3));
+
+        let start = ptr + crate::constants::SIZE_OF_PTR * 4;
+
+        let mut result = Vec::new();
+
+        for i in 0..count {
+            // read the value defined by element_definition at position start + i * arrayDefinition.size
+            // every different type will have a different read method .. :(
+            let value = self
+                .reader
+                .read_i32(start + (i as usize * array_definition.size as usize));
+            result.push(value);
+        }
+
+        return Some(result);
+    }
 
     // pub fn read_managed_struct_instance<T>(&self) -> Option<T>
 
@@ -602,15 +655,15 @@ pub enum TypeCode {
 
     FNPTR = 0x1b, /* arg: full method signature */
     OBJECT = 0x1c,
-    SZARRAY = 0x1d,   /* 0-based one-dim-array */
-    MVAR = 0x1e,      /* number */
-    CMOD_REQD = 0x1f, /* arg: typedef or typeref token */
-    CMOD_OPT = 0x20,  /* optional arg: typedef or typref token */
-    INTERNAL = 0x21,  /* CLR internal type */
-    MODIFIER = 0x40,  /* Or with the following types */
-    SENTINEL = 0x41,  /* Sentinel for varargs method signature */
-    PINNED = 0x45,    /* Local var that points to pinned object */
-    ENUM = 0x55,      /* an enumeration */
+    SZARRAY = 0x1d,  /* 0-based one-dim-array */
+    MVAR = 0x1e,     /* number */
+    CMODREQD = 0x1f, /* arg: typedef or typeref token */
+    CMODOPT = 0x20,  /* optional arg: typedef or typref token */
+    INTERNAL = 0x21, /* CLR internal type */
+    MODIFIER = 0x40, /* Or with the following types */
+    SENTINEL = 0x41, /* Sentinel for varargs method signature */
+    PINNED = 0x45,   /* Local var that points to pinned object */
+    ENUM = 0x55,     /* an enumeration */
 }
 
 impl Display for TypeCode {
@@ -645,14 +698,13 @@ impl Display for TypeCode {
             TypeCode::OBJECT => write!(f, "OBJECT"),
             TypeCode::SZARRAY => write!(f, "SZARRAY"),
             TypeCode::MVAR => write!(f, "MVAR"),
-            TypeCode::CMOD_REQD => write!(f, "CMOD_REQD"),
-            TypeCode::CMOD_OPT => write!(f, "CMOD_OPT"),
+            TypeCode::CMODREQD => write!(f, "CMOD_REQD"),
+            TypeCode::CMODOPT => write!(f, "CMOD_OPT"),
             TypeCode::INTERNAL => write!(f, "INTERNAL"),
             TypeCode::MODIFIER => write!(f, "MODIFIER"),
             TypeCode::SENTINEL => write!(f, "SENTINEL"),
             TypeCode::PINNED => write!(f, "PINNED"),
             TypeCode::ENUM => write!(f, "ENUM"),
-            _ => write!(f, "UNKNOWN"),
         }
     }
 }
@@ -664,9 +716,6 @@ pub struct TypeDefinition<'a> {
     pub field_count: i32,
     pub parent_addr: usize,
     pub nested_in_addr: usize,
-    // lazy_full_name: usize,
-    // lazy_fields: usize,
-    // lazy_generic: usize,
     pub name: String,
     pub namespace_name: String,
     pub size: i32,
@@ -831,8 +880,8 @@ impl TypeInfo {
             0x1c => TypeCode::OBJECT,
             0x1d => TypeCode::SZARRAY,
             0x1e => TypeCode::MVAR,
-            0x1f => TypeCode::CMOD_REQD,
-            0x20 => TypeCode::CMOD_OPT,
+            0x1f => TypeCode::CMODREQD,
+            0x20 => TypeCode::CMODOPT,
             0x21 => TypeCode::INTERNAL,
             0x40 => TypeCode::MODIFIER,
             0x41 => TypeCode::SENTINEL,
