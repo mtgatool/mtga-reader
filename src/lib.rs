@@ -406,20 +406,6 @@ impl<'a> Managed<'a> {
         self.reader.read_i32(self.addr)
     }
 
-    // ReadManaged type CLASS
-    // ReadManaged address: 2186998511264
-    // ReadManagedClassInstance address: 2186998511264
-    // ReadManagedClassInstance ptr: 2186994410176
-    // address: 2186994410176
-    // this.Address: 2186994410176
-    // this.Image.Address): 2182574568768
-    // vtable: 2187022940944
-    // definitionAddress: 2183195717312
-    // ReadManaged type I4
-    // ReadManaged address: 2180339612944
-    // ReadManaged type BOOLEAN
-    // ReadManaged address: 2186998511272
-
     pub fn read_class(&self) -> TypeDefinition {
         let ptr = self.reader.read_ptr(self.addr);
         let vtable = self.reader.read_ptr(ptr);
@@ -481,86 +467,88 @@ impl<'a> Managed<'a> {
     // pub fn read_managed_object<T>(&self) -> Option<T>
 }
 
-// pub fn read_managed<T>(type_code: TypeCode) -> Option<T> {
-//     match type_code {
-//         // 1, b => b[0] != 0
-//         TypeCode::BOOLEAN => Some(self.read_ptr_u8(addr) != 0),
+/*
+pub fn read_managed<T>(type_code: TypeCode) -> Option<T> {
+    match type_code {
+        // 1, b => b[0] != 0
+        TypeCode::BOOLEAN => Some(self.read_ptr_u8(addr) != 0),
 
-//         // char -> char
-//         TypeCode::CHAR => Some(self.read_ptr_u16(addr)),
+        // char -> char
+        TypeCode::CHAR => Some(self.read_ptr_u16(addr)),
 
-//         // sizeof(byte), b => b[0]
-//         TypeCode::I1 => Some(self.read_ptr_i8(addr)),
+        // sizeof(byte), b => b[0]
+        TypeCode::I1 => Some(self.read_ptr_i8(addr)),
 
-//         // sizeof(sbyte), b => unchecked((sbyte)b[0])
-//         TypeCode::U1 => Some(self.read_ptr_u8(addr)),
+        // sizeof(sbyte), b => unchecked((sbyte)b[0])
+        TypeCode::U1 => Some(self.read_ptr_u8(addr)),
 
-//         // short size -> int16
-//         TypeCode::I2 => Some(self.read_ptr_i16(addr)),
+        // short size -> int16
+        TypeCode::I2 => Some(self.read_ptr_i16(addr)),
 
-//         // ushort size -> uint16
-//         TypeCode::U2 => Some(self.read_ptr_u16(addr)),
+        // ushort size -> uint16
+        TypeCode::U2 => Some(self.read_ptr_u16(addr)),
 
-//         // int32
-//         TypeCode::I => Some(self.read_i32(addr)),
-//         TypeCode::I4 => Some(self.read_i32(addr)),
+        // int32
+        TypeCode::I => Some(self.read_i32(addr)),
+        TypeCode::I4 => Some(self.read_i32(addr)),
 
-//         // unsigned int32
-//         TypeCode::U => Some(self.read_u32(addr)),
-//         TypeCode::U4 => Some(self.read_u32(addr)),
+        // unsigned int32
+        TypeCode::U => Some(self.read_u32(addr)),
+        TypeCode::U4 => Some(self.read_u32(addr)),
 
-//         // char size -> int64
-//         TypeCode::I8 => Some(self.read_ptr_i64(addr)),
+        // char size -> int64
+        TypeCode::I8 => Some(self.read_ptr_i64(addr)),
 
-//         // char size -> uint64
-//         TypeCode::U8 => Some(self.read_ptr_u64(addr)),
+        // char size -> uint64
+        TypeCode::U8 => Some(self.read_ptr_u64(addr)),
 
-//         // char size -> single
-//         TypeCode::R4 => Some(self.read_ptr_u32(addr)),
-//         // char size -> double
-//         TypeCode::R8 => Some(self.read_i64(addr)),
+        // char size -> single
+        TypeCode::R4 => Some(self.read_ptr_u32(addr)),
+        // char size -> double
+        TypeCode::R8 => Some(self.read_i64(addr)),
 
-//         TypeCode::STRING => Some(self.read_ascii_string(addr)),
+        TypeCode::STRING => Some(self.read_ascii_string(addr)),
 
-//         // ReadManagedArray
-//         TypeCode::SZARRAY => Some(self.read_ptr_ptr(addr)),
+        // ReadManagedArray
+        TypeCode::SZARRAY => Some(self.read_ptr_ptr(addr)),
 
-//         // try ReadManagedStructInstance
-//         TypeCode::VALUETYPE => Some(self.read_i32(addr)),
+        // try ReadManagedStructInstance
+        TypeCode::VALUETYPE => Some(self.read_i32(addr)),
 
-//         // ReadManagedClassInstance
-//         TypeCode::CLASS => Some(self.read_ptr_ptr(addr)),
+        // ReadManagedClassInstance
+        TypeCode::CLASS => Some(self.read_ptr_ptr(addr)),
 
-//         // ReadManagedGenericObject
-//         TypeCode::GENERICINST => Some(self.read_ptr_ptr(addr)),
+        // ReadManagedGenericObject
+        TypeCode::GENERICINST => Some(self.read_ptr_ptr(addr)),
 
-//         // ReadManagedGenericObject
-//         TypeCode::OBJECT => Some(self.read_ptr_ptr(addr)),
+        // ReadManagedGenericObject
+        TypeCode::OBJECT => Some(self.read_ptr_ptr(addr)),
 
-//         // ReadManagedVar
-//         TypeCode::VAR => Some(self.read_ptr_i32(addr)),
+        // ReadManagedVar
+        TypeCode::VAR => Some(self.read_ptr_i32(addr)),
 
-//         // Junk
-//         TypeCode::END => Some(0),
-//         TypeCode::VOID => Some(0),
-//         TypeCode::PTR => Some(0),
-//         TypeCode::BYREF => Some(0),
-//         TypeCode::TYPEDBYREF => Some(0),
-//         TypeCode::FNPTR => Some(0),
-//         TypeCode::CMOD_REQD => Some(0),
-//         TypeCode::CMOD_OPT => Some(0),
-//         TypeCode::INTERNAL => Some(0),
-//         TypeCode::MODIFIER => Some(0),
-//         TypeCode::SENTINEL => Some(0),
-//         TypeCode::PINNED => Some(0),
+        // Junk
+        TypeCode::END => Some(0),
+        TypeCode::VOID => Some(0),
+        TypeCode::PTR => Some(0),
+        TypeCode::BYREF => Some(0),
+        TypeCode::TYPEDBYREF => Some(0),
+        TypeCode::FNPTR => Some(0),
+        TypeCode::CMOD_REQD => Some(0),
+        TypeCode::CMOD_OPT => Some(0),
+        TypeCode::INTERNAL => Some(0),
+        TypeCode::MODIFIER => Some(0),
+        TypeCode::SENTINEL => Some(0),
+        TypeCode::PINNED => Some(0),
 
-//         // May need support
-//         TypeCode::ARRAY => Some(0),
-//         TypeCode::ENUM => Some(0),
-//         TypeCode::MVAR => Some(0),
-//         _ => None,
-//     }
-// }
+        // May need support
+        TypeCode::ARRAY => Some(0),
+        TypeCode::ENUM => Some(0),
+        TypeCode::MVAR => Some(0),
+        _ => None,
+    }
+}
+*/
 
 #[derive(Clone)]
 pub enum MonoClassKind {
@@ -719,6 +707,7 @@ pub struct TypeDefinition<'a> {
     pub name: String,
     pub namespace_name: String,
     pub size: i32,
+    pub vtable_ptr: usize,
     pub v_table: usize,
     pub v_table_size: i32,
     pub type_info: TypeInfo,
@@ -763,7 +752,8 @@ impl<'a> TypeDefinition<'a> {
         };
 
         let v_table_size = if v_table != 0 {
-            reader.read_i32(v_table + crate::constants::TYPE_DEFINITION_V_TABLE_SIZE as usize)
+            reader
+                .read_i32(definition_addr + crate::constants::TYPE_DEFINITION_V_TABLE_SIZE as usize)
         } else {
             0
         };
@@ -787,6 +777,7 @@ impl<'a> TypeDefinition<'a> {
             name,
             namespace_name,
             size,
+            vtable_ptr,
             v_table,
             v_table_size,
             type_info,
@@ -817,6 +808,30 @@ impl<'a> TypeDefinition<'a> {
         }
 
         return fields;
+    }
+
+    pub fn get_static_value(&self, field_name: &str) -> usize {
+        let fields = self.get_fields();
+        for field in fields {
+            let field_def = FieldDefinition::new(field, self.reader);
+            if !field_def.type_info.is_const
+                && field_def.type_info.is_static
+                && field_def.name == field_name
+            {
+                // let field_addr = field + field_def.offset as usize;
+                println!("{field_name} addr: {:?}", field);
+
+                let v_table_memory_size =
+                    crate::constants::SIZE_OF_PTR * self.v_table_size as usize;
+
+                let value_ptr = self.reader.read_ptr(
+                    self.v_table + (crate::constants::V_TABLE as usize) + v_table_memory_size,
+                );
+
+                return value_ptr;
+            }
+        }
+        return 0;
     }
 }
 
