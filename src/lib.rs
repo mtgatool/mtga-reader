@@ -406,7 +406,7 @@ impl<'a> Managed<'a> {
         self.reader.read_i32(self.addr)
     }
 
-    pub fn read_class(&self) -> TypeDefinition {
+    pub fn read_class_address(&self) -> usize {
         let ptr = self.reader.read_ptr(self.addr);
         let vtable = self.reader.read_ptr(ptr);
         let definition_addr = self.reader.read_ptr(vtable);
@@ -416,7 +416,12 @@ impl<'a> Managed<'a> {
         println!("vtable: {:?}", vtable);
         println!("definition_addr: {:?}", definition_addr);
 
-        return TypeDefinition::new(definition_addr, self.reader);
+        return definition_addr;
+    }
+
+    pub fn read_class(&self) -> TypeDefinition {
+        let address = self.read_class_address();
+        return TypeDefinition::new(address, self.reader);
     }
 
     // pub fn read_managed_array<T>(&self) -> Option<T>
@@ -840,7 +845,7 @@ impl<'a> TypeDefinition<'a> {
             let field_def = FieldDefinition::new(field, self.reader);
             if field_def.name == field_name {
                 println!("field: {}, offset {}", field, field_def.offset);
-                return field + field_def.offset as usize;
+                return field;
             }
         }
         return 0;
