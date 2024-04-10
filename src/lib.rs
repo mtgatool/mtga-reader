@@ -811,24 +811,36 @@ impl<'a> TypeDefinition<'a> {
     }
 
     pub fn get_static_value(&self, field_name: &str) -> usize {
+        // println!("get_static_value: {:?}", field_name);
         let fields = self.get_fields();
         for field in fields {
             let field_def = FieldDefinition::new(field, self.reader);
-            if !field_def.type_info.is_const
-                && field_def.type_info.is_static
-                && field_def.name == field_name
-            {
+            if !field_def.type_info.is_const && field_def.type_info.is_static {
                 // let field_addr = field + field_def.offset as usize;
-                println!("{field_name} addr: {:?}", field);
+                // println!("  {}: {:?}", field_def.name, field);
 
-                let v_table_memory_size =
-                    crate::constants::SIZE_OF_PTR * self.v_table_size as usize;
+                if field_def.name == field_name {
+                    let v_table_memory_size =
+                        crate::constants::SIZE_OF_PTR * self.v_table_size as usize;
 
-                let value_ptr = self.reader.read_ptr(
-                    self.v_table + (crate::constants::V_TABLE as usize) + v_table_memory_size,
-                );
+                    let value_ptr = self.reader.read_ptr(
+                        self.v_table + (crate::constants::V_TABLE as usize) + v_table_memory_size,
+                    );
 
-                return value_ptr;
+                    return value_ptr;
+                }
+            }
+        }
+        return 0;
+    }
+
+    pub fn get_field(&self, field_name: &str) -> usize {
+        let fields = self.get_fields();
+        for field in fields {
+            let field_def = FieldDefinition::new(field, self.reader);
+            if field_def.name == field_name {
+                println!("field: {}, offset {}", field, field_def.offset);
+                return field + field_def.offset as usize;
             }
         }
         return 0;
