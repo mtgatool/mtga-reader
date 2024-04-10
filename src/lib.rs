@@ -850,6 +850,13 @@ impl<'a> TypeDefinition<'a> {
         }
         return 0;
     }
+
+    pub fn get_value(&self, field_name: &str, ptr: usize) -> usize {
+        let field = self.get_field(field_name);
+        let def = FieldDefinition::new(field, self.reader);
+
+        return def.offset as usize + ptr;
+    }
 }
 
 #[derive(Clone)]

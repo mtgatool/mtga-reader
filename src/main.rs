@@ -78,14 +78,12 @@ fn main() {
         let managed = Managed::new(&mono_reader, field);
         let class = managed.read_class();
         let ptr = mono_reader.read_ptr(field);
-        let field = class.get_field(find[2]);
-        let fd = FieldDefinition::new(field, &mono_reader);
+        let field = class.get_value(find[2], ptr);
 
-        println!("Found 2 {} {}", find[2], fd.offset as usize + ptr);
+        println!("Found 2 {} {}", find[2], field);
 
-        let managed = Managed::new(&mono_reader, fd.offset as usize + ptr);
+        let managed = Managed::new(&mono_reader, field);
         let class = managed.read_class();
-
 
         for field in class.get_fields() {
             let fd = FieldDefinition::new(field, &mono_reader);
