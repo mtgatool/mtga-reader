@@ -98,27 +98,31 @@ fn main() {
 
         let managed = Managed::new(&mono_reader, field);
         let class = managed.read_class();
+        let ptr = mono_reader.read_ptr(field);
 
         for field in class.get_fields() {
             let field_def = FieldDefinition::new(field, &mono_reader);
 
             let code = field_def.type_info.clone().code();
-            print!("   {} {}", field_def.name, code);
+            print!("   {}, {} ", field_def.name, code);
+            let managed = Managed::new(&mono_reader, ptr + field_def.offset as usize);
             match code {
                 TypeCode::BOOLEAN => {
-                    let managed = Managed::new(&mono_reader, field + field_def.offset as usize);
                     print!(" = {}", managed.read_boolean());
                 }
                 TypeCode::U4 => {
-                    let managed = Managed::new(&mono_reader, field + field_def.offset as usize);
                     print!(" = {}", managed.read_u4());
                 }
                 TypeCode::R4 => {
-                    let managed = Managed::new(&mono_reader, field + field_def.offset as usize);
                     print!(" = {}", managed.read_r4());
                 }
+                TypeCode::I4 => {
+                    print!(" = {}", managed.read_i4());
+                }
+                TypeCode::STRING => {
+                    print!(" = {}", managed.read_string());
+                }
                 TypeCode::VALUETYPE => {
-                    let managed = Managed::new(&mono_reader, field + field_def.offset as usize);
                     print!(" = {}", managed.read_valuetype());
                 }
                 _ => {

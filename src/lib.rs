@@ -402,6 +402,35 @@ impl<'a> Managed<'a> {
         self.reader.read_i32(self.addr)
     }
 
+    pub fn read_i4(&self) -> i32 {
+        self.reader.read_i32(self.addr)
+    }
+
+    pub fn read_string(&self) -> String {
+        let ptr = self.reader.read_ptr(self.addr);
+        let length = self
+            .reader
+            .read_i32(ptr + (crate::constants::SIZE_OF_PTR * 2 as usize));
+
+        let mut str = Vec::new();
+
+        for i in 0..(length * 2) {
+            let val = self
+                .reader
+                .read_u16(ptr + (crate::constants::SIZE_OF_PTR * 2 as usize) + 4 + (i as usize));
+
+            str.push(val);
+        }
+
+        // Convert the vector to a string
+        let string: String = str
+            .iter()
+            .map(|&c| c as u8 as char)
+            .collect::<String>();
+
+        return string;
+    }
+
     pub fn read_valuetype(&self) -> i32 {
         self.reader.read_i32(self.addr)
     }
