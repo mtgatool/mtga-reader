@@ -44,7 +44,7 @@ fn main() {
             "<Instance>k__BackingField",
             "<InventoryManager>k__BackingField",
             "_inventoryServiceWrapper",
-            "m_inventory",
+            "<Cards>k__BackingField",
         ];
 
         // get the type defs on the root of the assembly for the first loop
@@ -52,42 +52,32 @@ fn main() {
             .unwrap()
             .clone();
 
+        // Not sure if this is only for the first item in the find array or for all static fields
         let td = TypeDefinition::new(definition, &mono_reader);
         let static_field_addr = td.get_static_value(find[1]);
 
-        println!("static_field_addr: {}", static_field_addr);
+        // skipt the first item in the find array
+        let find = &find[2..];
 
-        let managed = Managed::new(&mono_reader, static_field_addr);
+        let mut field = (static_field_addr.0.clone(), static_field_addr.1);
+        // loop trough the find array
+        for name in find {
+            let managed = Managed::new(&mono_reader, field.0);
+
+            let class = managed.read_class();
+            if class.type_info.is_static {
+                field = class.get_static_value(name);
+            } else {
+                let ptr = mono_reader.read_ptr(field.0);
+                field = class.get_value(name, ptr);
+            }
+            println!("{}: {}", name, field.1);
+        }
+
+        // print the fields of the last item in the find array
+        let managed = Managed::new(&mono_reader, field.0);
         let class = managed.read_class();
-        let field = class.get_static_value(find[1]);
-
-        println!("Found 1 {} {}", find[1], field);
-
-        // read a class (ManagedClassInstance, non static field)
-        let managed = Managed::new(&mono_reader, field);
-        let class = managed.read_class();
-        let ptr = mono_reader.read_ptr(field);
-        let field = class.get_value(find[2], ptr);
-
-        println!("Found 2 {} {}", find[2], field);
-
-        let managed = Managed::new(&mono_reader, field);
-        let class = managed.read_class();
-        let ptr = mono_reader.read_ptr(field);
-        let field = class.get_value(find[3], ptr);
-
-        println!("Found 3 {} {} {}", find[3], ptr, field);
-
-        let managed = Managed::new(&mono_reader, field);
-        let class = managed.read_class();
-        let ptr = mono_reader.read_ptr(field);
-        let field = class.get_value(find[4], ptr);
-
-        println!("Found 4 {} {} {}", find[4], ptr, field);
-
-        let managed = Managed::new(&mono_reader, field);
-        let class = managed.read_class();
-        let ptr = mono_reader.read_ptr(field);
+        let ptr = mono_reader.read_ptr(field.0);
 
         for field in class.get_fields() {
             let field_def = FieldDefinition::new(field, &mono_reader);

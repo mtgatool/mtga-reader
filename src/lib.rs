@@ -450,10 +450,10 @@ impl<'a> Managed<'a> {
         let vtable = self.reader.read_ptr(ptr);
         let definition_addr = self.reader.read_ptr(vtable);
 
-        println!("ptr: {:?}", ptr);
-        println!("self.addr: {:?}", self.addr);
-        println!("vtable: {:?}", vtable);
-        println!("definition_addr: {:?}", definition_addr);
+        // println!("ptr: {:?}", ptr);
+        // println!("self.addr: {:?}", self.addr);
+        // println!("vtable: {:?}", vtable);
+        // println!("definition_addr: {:?}", definition_addr);
 
         return definition_addr;
     }
@@ -854,7 +854,7 @@ impl<'a> TypeDefinition<'a> {
         return fields;
     }
 
-    pub fn get_static_value(&self, field_name: &str) -> usize {
+    pub fn get_static_value(&self, field_name: &str) -> (usize, TypeCode) {
         // println!("get_static_value: {:?}", field_name);
         let fields = self.get_fields();
         for field in fields {
@@ -871,30 +871,31 @@ impl<'a> TypeDefinition<'a> {
                         self.v_table + (crate::constants::V_TABLE as usize) + v_table_memory_size,
                     );
 
-                    return value_ptr;
+                    return (value_ptr, field_def.type_info.code());
                 }
             }
         }
-        return 0;
+        return (0, TypeCode::END);
     }
 
-    pub fn get_field(&self, field_name: &str) -> usize {
+    pub fn get_field(&self, field_name: &str) -> (usize, TypeCode) {
         let fields = self.get_fields();
         for field in fields {
             let field_def = FieldDefinition::new(field, self.reader);
+            let code = field_def.type_info.code();
+            println!("  field: {}, {}", field_def.name, code);
             if field_def.name == field_name {
-                println!("field: {}, offset {}", field, field_def.offset);
-                return field;
+                return (field, code);
             }
         }
-        return 0;
+        return (0, TypeCode::END);
     }
 
-    pub fn get_value(&self, field_name: &str, ptr: usize) -> usize {
+    pub fn get_value(&self, field_name: &str, ptr: usize) -> (usize, TypeCode) {
         let field = self.get_field(field_name);
-        let def = FieldDefinition::new(field, self.reader);
+        let def = FieldDefinition::new(field.0, self.reader);
 
-        return def.offset as usize + ptr;
+        return (def.offset as usize + ptr, def.type_info.code());
     }
 }
 
