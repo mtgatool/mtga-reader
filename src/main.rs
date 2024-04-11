@@ -22,17 +22,6 @@ fn get_def_by_name<'a>(
     })
 }
 
-fn get_def_by_addr<'a>(
-    defs: &'a Vec<usize>,
-    addr: usize,
-    mono_reader: &MonoReader,
-) -> Option<&'a usize> {
-    defs.iter().find(|def| {
-        let main_typedef = TypeDefinition::new(**def, &mono_reader);
-        main_typedef.type_info.addr == addr
-    })
-}
-
 fn main() {
     println!("Reading started...");
 
@@ -113,11 +102,26 @@ fn main() {
                 TypeCode::U4 => {
                     print!(" = {}", managed.read_u4());
                 }
+                TypeCode::U => {
+                    print!(" = {}", managed.read_u4());
+                }
                 TypeCode::R4 => {
                     print!(" = {}", managed.read_r4());
                 }
+                TypeCode::R8 => {
+                    print!(" = {}", managed.read_r8());
+                }
                 TypeCode::I4 => {
                     print!(" = {}", managed.read_i4());
+                }
+                TypeCode::I => {
+                    print!(" = {}", managed.read_i4());
+                }
+                TypeCode::I2 => {
+                    print!(" = {}", managed.read_i2());
+                }
+                TypeCode::U2 => {
+                    print!(" = {}", managed.read_u2());
                 }
                 TypeCode::STRING => {
                     print!(" = {}", managed.read_string());

@@ -402,8 +402,21 @@ impl<'a> Managed<'a> {
         self.reader.read_i32(self.addr)
     }
 
+    pub fn read_r8(&self) -> i64 {
+        self.reader.read_i64(self.addr)
+    }
+
+    // read_i
     pub fn read_i4(&self) -> i32 {
         self.reader.read_i32(self.addr)
+    }
+
+    pub fn read_i2(&self) -> i16 {
+        self.reader.read_i16(self.addr)
+    }
+
+    pub fn read_u2(&self) -> u16 {
+        self.reader.read_u16(self.addr)
     }
 
     pub fn read_string(&self) -> String {
@@ -423,10 +436,7 @@ impl<'a> Managed<'a> {
         }
 
         // Convert the vector to a string
-        let string: String = str
-            .iter()
-            .map(|&c| c as u8 as char)
-            .collect::<String>();
+        let string: String = str.iter().map(|&c| c as u8 as char).collect::<String>();
 
         return string;
     }
@@ -467,8 +477,8 @@ impl<'a> Managed<'a> {
 
         let array_definition = TypeDefinition::new(array_definition_ptr, self.reader);
 
-        let element_definition =
-            TypeDefinition::new(self.reader.read_ptr(array_definition_ptr), self.reader);
+        // let element_definition =
+        //     TypeDefinition::new(self.reader.read_ptr(array_definition_ptr), self.reader);
 
         let count = self
             .reader
