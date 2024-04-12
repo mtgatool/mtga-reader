@@ -71,7 +71,8 @@ fn main() {
                 let ptr = mono_reader.read_ptr(field.0);
                 field = class.get_value(name, ptr);
             }
-            println!("{}: {}", name, field.1);
+            let code = field.1.clone();
+            println!("{}: {}", name, code.code());
         }
 
         // print the fields of the last item in the find array
