@@ -756,12 +756,18 @@ pub struct TypeDefinition<'a> {
     pub v_table_size: i32,
     pub type_info: TypeInfo,
     pub class_kind: MonoClassKind,
+    pub is_enum: bool,
+    pub is_value_type: bool,
 }
 
 impl<'a> TypeDefinition<'a> {
     pub fn new(definition_addr: usize, reader: &'a MonoReader) -> Self {
         let bit_fields = reader
             .read_u32(definition_addr + crate::constants::TYPE_DEFINITION_BIT_FIELDS as usize);
+
+        let is_enum = (bit_fields & 0x8) == 0x8;
+
+        let is_value_type = (bit_fields & 0x4) == 0x4;
 
         let field_count = reader
             .read_i32(definition_addr + crate::constants::TYPE_DEFINITION_FIELD_COUNT as usize);
@@ -826,6 +832,8 @@ impl<'a> TypeDefinition<'a> {
             v_table_size,
             type_info,
             class_kind,
+            is_enum,
+is_value_type,
         }
     }
 
@@ -854,7 +862,7 @@ impl<'a> TypeDefinition<'a> {
         return fields;
     }
 
-    pub fn get_static_value(&self, field_name: &str) -> (usize, TypeCode) {
+    pub fn get_static_value(&self, field_name: &str) -> (usize, TypeInfo) {
         // println!("get_static_value: {:?}", field_name);
         let fields = self.get_fields();
         for field in fields {
@@ -871,31 +879,32 @@ impl<'a> TypeDefinition<'a> {
                         self.v_table + (crate::constants::V_TABLE as usize) + v_table_memory_size,
                     );
 
-                    return (value_ptr, field_def.type_info.code());
+                    return (value_ptr, field_def.type_info);
                 }
             }
         }
-        return (0, TypeCode::END);
+        return (0, TypeInfo::new(0, self.reader));
     }
 
-    pub fn get_field(&self, field_name: &str) -> (usize, TypeCode) {
+    pub fn get_field(&self, field_name: &str) -> (usize, TypeInfo) {
         let fields = self.get_fields();
         for field in fields {
             let field_def = FieldDefinition::new(field, self.reader);
+            let type_info = field_def.type_info.clone();
             let code = field_def.type_info.code();
             println!("  field: {}, {}", field_def.name, code);
             if field_def.name == field_name {
-                return (field, code);
+                return (field, type_info);
             }
         }
-        return (0, TypeCode::END);
+        return (0, TypeInfo::new(0, self.reader));
     }
 
-    pub fn get_value(&self, field_name: &str, ptr: usize) -> (usize, TypeCode) {
+    pub fn get_value(&self, field_name: &str, ptr: usize) -> (usize, TypeInfo) {
         let field = self.get_field(field_name);
         let def = FieldDefinition::new(field.0, self.reader);
 
-        return (def.offset as usize + ptr, def.type_info.code());
+        return (def.offset as usize + ptr, def.type_info);
     }
 }
 
@@ -910,7 +919,7 @@ pub struct TypeInfo {
 }
 
 impl TypeInfo {
-    fn new(addr: usize, reader: &MonoReader) -> Self {
+    pub fn new(addr: usize, reader: &MonoReader) -> Self {
         let data = reader.read_ptr(addr);
         let attrs = reader.read_u32(addr + crate::constants::SIZE_OF_PTR);
         let is_static = (attrs & 0x10) == 0x10;
