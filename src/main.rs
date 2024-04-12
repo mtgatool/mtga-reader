@@ -1,4 +1,4 @@
-use mtga_reader::{FieldDefinition, Managed, MonoReader, TypeCode, TypeDefinition};
+use mtga_reader::{FieldDefinition, Managed, MonoReader, TypeCode, TypeDefinition, TypeInfo};
 use sysinfo::{Pid as SysPid, System};
 
 fn find_pid_by_name(name: &str) -> Option<SysPid> {
@@ -52,33 +52,41 @@ fn main() {
             .unwrap()
             .clone();
 
-        // Not sure if this is only for the first item in the find array or for all static fields
-        let td = TypeDefinition::new(definition, &mono_reader);
-        let static_field_addr = td.get_static_value(find[1]);
-
         // skipt the first item in the find array
-        let find = &find[2..];
+        let find = &find[1..];
 
-        let mut field = (static_field_addr.0.clone(), static_field_addr.1);
-        // loop trough the find array
-        for name in find {
-            let managed = Managed::new(&mono_reader, field.0);
+        let mut field = (definition.clone(), TypeInfo::new(definition, &mono_reader));
 
-            let class = managed.read_class();
-            if class.type_info.is_static {
-                field = class.get_static_value(name);
-            } else {
-                let ptr = mono_reader.read_ptr(field.0);
-                field = class.get_value(name, ptr);
-            }
+        for (index, name) in find.iter().enumerate() {
             let code = field.1.clone();
-            println!("{}: {}", name, code.code());
+            println!("Find: {}: {}", name, code.code());
+
+            field = match index {
+                0 => {
+                    let class = TypeDefinition::new(definition, &mono_reader);
+                    class.get_static_value(name)
+                }
+                _ => {
+                    let managed = Managed::new(&mono_reader, field.0);
+                    let class = managed.read_class();
+                    let ptr = mono_reader.read_ptr(field.0);
+                    class.get_value(name, ptr)
+                }
+            };
         }
 
-        // print the fields of the last item in the find array
-        let managed = Managed::new(&mono_reader, field.0);
-        let class = managed.read_class();
+        let code = field.1.clone().code();
+        println!("  {}", code);
+
+        let code = field.1.clone().code();
+
         let ptr = mono_reader.read_ptr(field.0);
+        let managed = Managed::new(&mono_reader, field.0);
+        let class = match code {
+            TypeCode::CLASS => managed.read_class(),
+            TypeCode::GENERICINST => managed.read_generic_instance(field.1.clone()),
+            _ => managed.read_class(),
+        };
 
         for field in class.get_fields() {
             let field_def = FieldDefinition::new(field, &mono_reader);

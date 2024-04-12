@@ -463,6 +463,13 @@ impl<'a> Managed<'a> {
         return TypeDefinition::new(address, self.reader);
     }
 
+    pub fn read_generic_instance(&self, type_info: TypeInfo) -> TypeDefinition {
+        let ptr = self.reader.read_ptr(type_info.data);
+        let td = TypeDefinition::new(ptr, self.reader);
+
+        return td;
+    }
+
     // pub fn read_managed_array<T>(&self) -> Option<T>
 
     pub fn read_managed_array(&self) -> Option<Vec<i32>> {
@@ -833,7 +840,7 @@ impl<'a> TypeDefinition<'a> {
             type_info,
             class_kind,
             is_enum,
-is_value_type,
+            is_value_type,
         }
     }
 
@@ -891,8 +898,8 @@ is_value_type,
         for field in fields {
             let field_def = FieldDefinition::new(field, self.reader);
             let type_info = field_def.type_info.clone();
-            let code = field_def.type_info.code();
-            println!("  field: {}, {}", field_def.name, code);
+            // let code = field_def.type_info.code();
+            // println!("  field: {}, {}", field_def.name, code);
             if field_def.name == field_name {
                 return (field, type_info);
             }
