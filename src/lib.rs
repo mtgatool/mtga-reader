@@ -3,6 +3,7 @@ use core::fmt::Debug;
 use core::fmt::Formatter;
 use proc_mem::{ProcMemError, Process};
 use process_memory::{DataMember, Memory, ProcessHandle, TryIntoProcessHandle};
+use std::cmp;
 use std::fmt::Display;
 
 pub mod constants;
@@ -423,11 +424,13 @@ impl<'a> Managed<'a> {
         let ptr = self.reader.read_ptr(self.addr);
         let length = self
             .reader
-            .read_i32(ptr + (crate::constants::SIZE_OF_PTR * 2 as usize));
+            .read_u32(ptr + (crate::constants::SIZE_OF_PTR * 2 as usize));
 
         let mut str = Vec::new();
 
-        for i in 0..(length * 2) {
+        let cap_length = cmp::min(length as u64 * 2, 1024);
+
+        for i in 0..(cap_length) {
             let val = self
                 .reader
                 .read_u16(ptr + (crate::constants::SIZE_OF_PTR * 2 as usize) + 4 + (i as usize));
@@ -472,7 +475,7 @@ impl<'a> Managed<'a> {
 
     // pub fn read_managed_array<T>(&self) -> Option<T>
 
-    pub fn read_managed_array(&self) -> Option<Vec<i32>> {
+    pub fn read_managed_array(&self) -> Option<Vec<Managed>> {
         let ptr = self.reader.read_ptr(self.addr);
         if ptr == 0 {
             return None;
@@ -484,8 +487,8 @@ impl<'a> Managed<'a> {
 
         let array_definition = TypeDefinition::new(array_definition_ptr, self.reader);
 
-        // let element_definition =
-        //     TypeDefinition::new(self.reader.read_ptr(array_definition_ptr), self.reader);
+        let element_definition =
+            TypeDefinition::new(self.reader.read_ptr(array_definition_ptr), self.reader);
 
         let count = self
             .reader
@@ -495,13 +498,20 @@ impl<'a> Managed<'a> {
 
         let mut result = Vec::new();
 
+        println!("Array count: {:?}", count);
+        println!("Array start: {:?}", start);
+        println!("Array element_definition: {:?}", element_definition.name);
+        println!(
+            "Array element_definition type: {}",
+            element_definition.type_info.clone().code()
+        );
+
         for i in 0..count {
-            // read the value defined by element_definition at position start + i * arrayDefinition.size
-            // every different type will have a different read method .. :(
-            let value = self
-                .reader
-                .read_i32(start + (i as usize * array_definition.size as usize));
-            result.push(value);
+            let managed = Managed::new(
+                self.reader,
+                start + (i as usize * array_definition.size as usize),
+            );
+            result.push(managed);
         }
 
         return Some(result);
@@ -912,6 +922,75 @@ impl<'a> TypeDefinition<'a> {
         let def = FieldDefinition::new(field.0, self.reader);
 
         return (def.offset as usize + ptr, def.type_info);
+    }
+}
+
+impl fmt::Display for TypeDefinition<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut fields_str: Vec<String> = Vec::new();
+        for _field in self.get_fields() {
+            let ptr = &self.reader.read_ptr(self.address);
+            let field_def = FieldDefinition::new(_field, &self.reader);
+            if field_def.type_info.clone().is_const {
+                continue;
+            }
+
+            let code = field_def.type_info.clone().code();
+
+            let managed = Managed::new(&self.reader, ptr + field_def.offset as usize);
+
+            match code {
+                TypeCode::BOOLEAN => {
+                    fields_str.push(format!(
+                        "\"{}\": {}",
+                        field_def.name,
+                        managed.read_boolean()
+                    ));
+                }
+                TypeCode::U4 => {
+                    fields_str.push(format!("\"{}\": {}", field_def.name, managed.read_u4()));
+                }
+                TypeCode::U => {
+                    fields_str.push(format!("\"{}\": {}", field_def.name, managed.read_u4()));
+                }
+                TypeCode::R4 => {
+                    fields_str.push(format!("\"{}\": {}", field_def.name, managed.read_r4()));
+                }
+                TypeCode::R8 => {
+                    fields_str.push(format!("\"{}\": {}", field_def.name, managed.read_r8()));
+                }
+                TypeCode::I4 => {
+                    fields_str.push(format!("\"{}\": {}", field_def.name, managed.read_i4()));
+                }
+                TypeCode::I => {
+                    fields_str.push(format!("\"{}\": {}", field_def.name, managed.read_i4()));
+                }
+                TypeCode::I2 => {
+                    fields_str.push(format!("\"{}\": {}", field_def.name, managed.read_i2()));
+                }
+                TypeCode::U2 => {
+                    fields_str.push(format!("\"{}\": {}", field_def.name, managed.read_u2()));
+                }
+                TypeCode::STRING => {
+                    fields_str.push(format!(
+                        "\"{}\": \"{}\"",
+                        field_def.name,
+                        managed.read_string()
+                    ));
+                }
+                TypeCode::VALUETYPE => {
+                    fields_str.push(format!(
+                        "\"{}\": {}",
+                        field_def.name,
+                        managed.read_valuetype()
+                    ));
+                }
+                _ => {
+                    fields_str.push(format!("\"{}\": {}", field_def.name, "null"));
+                }
+            }
+        }
+        write!(f, "{{ {} }}", fields_str.join(", "))
     }
 }
 
