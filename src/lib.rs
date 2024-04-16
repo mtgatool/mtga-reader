@@ -379,11 +379,20 @@ impl MonoReader {
 pub struct Managed<'a> {
     reader: &'a MonoReader,
     addr: usize,
+    generic_type_args: Vec<TypeInfo>,
 }
 
 impl<'a> Managed<'a> {
-    pub fn new(reader: &'a MonoReader, addr: usize) -> Self {
-        Managed { reader, addr }
+    pub fn new(
+        reader: &'a MonoReader,
+        addr: usize,
+        generic_type_args: Option<Vec<TypeInfo>>,
+    ) -> Self {
+        Managed {
+            reader,
+            addr,
+            generic_type_args: generic_type_args.unwrap_or(Vec::new()),
+        }
     }
 
     pub fn read_boolean(&self) -> bool {
@@ -466,16 +475,25 @@ impl<'a> Managed<'a> {
         return TypeDefinition::new(address, self.reader);
     }
 
+    pub fn read_raw_class(&self) -> TypeDefinition {
+        return TypeDefinition::new(self.addr, self.reader);
+    }
+
     pub fn read_generic_instance(&self, type_info: TypeInfo) -> TypeDefinition {
         let ptr = self.reader.read_ptr(type_info.data);
         let td = TypeDefinition::new(ptr, self.reader);
+
+        if td.is_value_type {
+            println!("Generic instance {}", self.addr);
+            return TypeDefinition::new(self.addr, self.reader);
+        }
 
         return td;
     }
 
     // pub fn read_managed_array<T>(&self) -> Option<T>
 
-    pub fn read_managed_array(&self) -> Option<Vec<Managed>> {
+    pub fn read_managed_array(&self) -> Option<Vec<String>> {
         let ptr = self.reader.read_ptr(self.addr);
         if ptr == 0 {
             return None;
@@ -490,31 +508,62 @@ impl<'a> Managed<'a> {
         let element_definition =
             TypeDefinition::new(self.reader.read_ptr(array_definition_ptr), self.reader);
 
-        let count = self
-            .reader
-            .read_i32(ptr + (crate::constants::SIZE_OF_PTR * 3));
+        let count = 1 as i32;
+        // self
+        // .reader
+        // .read_i32(ptr + (crate::constants::SIZE_OF_PTR * 3));
 
         let start = ptr + crate::constants::SIZE_OF_PTR * 4;
 
         let mut result = Vec::new();
 
-        println!("Array count: {:?}", count);
-        println!("Array start: {:?}", start);
-        println!("Array element_definition: {:?}", element_definition.name);
+        println!("Array ptr: {:?}", ptr);
+        println!("Array vtable: {:?}", vtable);
+        println!(
+            "Array array_definition.address: {:?}",
+            array_definition.address
+        );
+        println!(
+            "Array element_definition.address: {:?}",
+            element_definition.address
+        );
         println!(
             "Array element_definition type: {}",
             element_definition.type_info.clone().code()
         );
 
+        let code = element_definition.type_info.clone().code();
+
         for i in 0..count {
             let managed = Managed::new(
                 self.reader,
                 start + (i as usize * array_definition.size as usize),
+                Some(element_definition.generic_type_args.clone()),
             );
-            result.push(managed);
+
+            let strout = match code {
+                TypeCode::CLASS => managed.read_class().to_string(),
+                TypeCode::GENERICINST => {
+                    let m = managed.read_generic_instance(element_definition.type_info.clone());
+
+                    String::from("")
+                }
+                _ => {
+                    // println!("Code: {} strout not implemented", code);
+                    String::from("{}")
+                }
+            };
+
+            result.push(strout);
         }
 
         return Some(result);
+    }
+
+    pub fn read_var(&self) -> u32 {
+        let ptr = self.reader.read_u32(self.addr);
+
+        return ptr;
     }
 
     // pub fn read_managed_struct_instance<T>(&self) -> Option<T>
@@ -758,6 +807,45 @@ impl Display for TypeCode {
     }
 }
 
+fn get_type_size(type_code: TypeCode) -> usize {
+    match type_code {
+        TypeCode::BOOLEAN => 1,
+        TypeCode::CHAR => 2,
+        TypeCode::I1 => 1,
+        TypeCode::U1 => 1,
+        TypeCode::I2 => 2,
+        TypeCode::U2 => 2,
+        TypeCode::I4 => 4,
+        TypeCode::U4 => 4,
+        TypeCode::I8 => 8,
+        TypeCode::U8 => 8,
+        TypeCode::R4 => 4,
+        TypeCode::R8 => 8,
+        TypeCode::PTR => 4,
+        TypeCode::BYREF => 4,
+        TypeCode::VALUETYPE => 4,
+        TypeCode::CLASS => 4,
+        TypeCode::VAR => 4,
+        TypeCode::ARRAY => 4,
+        TypeCode::GENERICINST => 4,
+        TypeCode::TYPEDBYREF => 4,
+        TypeCode::I => 4,
+        TypeCode::U => 4,
+        TypeCode::FNPTR => 4,
+        TypeCode::OBJECT => 4,
+        TypeCode::SZARRAY => 4,
+        TypeCode::MVAR => 4,
+        TypeCode::CMODREQD => 4,
+        TypeCode::CMODOPT => 4,
+        TypeCode::INTERNAL => 4,
+        TypeCode::MODIFIER => 4,
+        TypeCode::SENTINEL => 4,
+        TypeCode::PINNED => 4,
+        TypeCode::ENUM => 4,
+        _ => 0,
+    }
+}
+
 pub struct TypeDefinition<'a> {
     reader: &'a MonoReader,
     address: usize,
@@ -775,6 +863,7 @@ pub struct TypeDefinition<'a> {
     pub class_kind: MonoClassKind,
     pub is_enum: bool,
     pub is_value_type: bool,
+    pub generic_type_args: Vec<TypeInfo>,
 }
 
 impl<'a> TypeDefinition<'a> {
@@ -834,6 +923,41 @@ impl<'a> TypeDefinition<'a> {
             reader.read_u8(definition_addr + crate::constants::TYPE_DEFINITION_CLASS_KIND as usize);
         let class_kind = match_class_kind(class_kind_value);
 
+        // Get the generic type arguments
+        let mut generic_type_args = Vec::new();
+        let code = type_info.clone().code();
+
+        println!("Type code: {}", code);
+
+        match code {
+            TypeCode::GENERICINST => {
+                let mono_generic_class_address = type_info.clone().data;
+                let mono_class_address = reader.read_ptr(mono_generic_class_address);
+                // this.Image.GetTypeDefinition(mono_class_address);
+
+                let mono_generic_container_ptr = mono_class_address
+                    + crate::constants::TYPE_DEFINITION_GENERIC_CONTAINER as usize;
+                let mono_generic_container_address = reader.read_ptr(mono_generic_container_ptr);
+
+                let mono_generic_context_ptr =
+                    mono_generic_class_address + crate::constants::SIZE_OF_PTR;
+                let mono_generic_ins_ptr = reader.read_ptr(mono_generic_context_ptr);
+
+                // var argument_count = this.Process.ReadInt32(mono_generic_ins_ptr + 0x4);
+                let argument_count = reader
+                    .read_u32(mono_generic_container_address + (4 * crate::constants::SIZE_OF_PTR));
+                let type_arg_v_ptr = mono_generic_ins_ptr + 0x8;
+
+                for i in 0..argument_count {
+                    let generic_type_argument_ptr = reader
+                        .read_ptr(type_arg_v_ptr + (i as usize * crate::constants::SIZE_OF_PTR));
+                    let t = TypeInfo::new(generic_type_argument_ptr, reader);
+                    generic_type_args.push(t);
+                }
+            }
+            _ => {}
+        }
+
         TypeDefinition {
             address: definition_addr,
             reader,
@@ -851,6 +975,7 @@ impl<'a> TypeDefinition<'a> {
             class_kind,
             is_enum,
             is_value_type,
+            generic_type_args,
         }
     }
 
@@ -908,7 +1033,7 @@ impl<'a> TypeDefinition<'a> {
         for field in fields {
             let field_def = FieldDefinition::new(field, self.reader);
             let type_info = field_def.type_info.clone();
-            let code = field_def.type_info.code();
+            // let code = field_def.type_info.code();
             // println!("  field: {}, {}", field_def.name, code);
             if field_def.name == field_name {
                 return (field, type_info);
@@ -937,7 +1062,7 @@ impl fmt::Display for TypeDefinition<'_> {
 
             let code = field_def.type_info.clone().code();
 
-            let managed = Managed::new(&self.reader, ptr + field_def.offset as usize);
+            let managed = Managed::new(&self.reader, ptr + field_def.offset as usize, None);
 
             // println!("  {}: {}", field_def.name, field_def.type_info.code());
 
@@ -987,8 +1112,31 @@ impl fmt::Display for TypeDefinition<'_> {
                         managed.read_valuetype()
                     ));
                 }
+                TypeCode::VAR => {
+                    let number_of_generic_argument = self
+                        .reader
+                        .read_u32(field_def.type_info.clone().data + crate::constants::SIZE_OF_PTR);
+
+                    // println!("number_of_generic_argument: {}", number_of_generic_argument);
+                    // for arg in self.generic_type_args.iter() {
+                    //     println!("- code: {}", arg.clone().code());
+                    // }
+
+                    let mut offset: i32 = 0;
+                    for _i in 0..number_of_generic_argument {
+                        // let arg = self.generic_type_args[i as usize].clone().code();
+                        offset += get_type_size(TypeCode::U4) as i32
+                            - crate::constants::SIZE_OF_PTR as i32;
+                    }
+
+                    let managed =
+                        Managed::new(&self.reader, ptr + field_def.offset as usize - 4, None);
+                    let var = managed.read_var();
+
+                    fields_str.push(format!("\"{}\": {}", field_def.name, ptr));
+                }
                 _ => {
-                    fields_str.push(format!("\"{}\": {}", field_def.name, "null"));
+                    fields_str.push(format!("\"{}\": {}, {}", field_def.name, code, "null"));
                 }
             }
         }
@@ -1072,6 +1220,7 @@ pub struct FieldDefinition {
     pub type_info: TypeInfo,
     pub name: String,
     pub offset: i32,
+    pub generic_type_args: Vec<TypeInfo>,
 }
 
 impl FieldDefinition {
@@ -1083,10 +1232,43 @@ impl FieldDefinition {
 
         let offset = reader.read_i32(addr + crate::constants::SIZE_OF_PTR * 3 as usize);
 
+        // Get the generic type arguments
+        let mut generic_type_args = Vec::new();
+        let code = type_info.clone().code();
+        match code {
+            TypeCode::GENERICINST => {
+                let mono_generic_class_address = type_info.clone().data;
+                let mono_class_address = reader.read_ptr(mono_generic_class_address);
+                // this.Image.GetTypeDefinition(mono_class_address);
+
+                let mono_generic_container_ptr = mono_class_address
+                    + crate::constants::TYPE_DEFINITION_GENERIC_CONTAINER as usize;
+                let mono_generic_container_address = reader.read_ptr(mono_generic_container_ptr);
+
+                let mono_generic_context_ptr =
+                    mono_generic_class_address + crate::constants::SIZE_OF_PTR;
+                let mono_generic_ins_ptr = reader.read_ptr(mono_generic_context_ptr);
+
+                // var argument_count = this.Process.ReadInt32(mono_generic_ins_ptr + 0x4);
+                let argument_count = reader
+                    .read_u32(mono_generic_container_address + (4 * crate::constants::SIZE_OF_PTR));
+                let type_arg_v_ptr = mono_generic_ins_ptr + 0x8;
+
+                for i in 0..argument_count {
+                    let generic_type_argument_ptr = reader
+                        .read_ptr(type_arg_v_ptr + (i as usize * crate::constants::SIZE_OF_PTR));
+                    let t = TypeInfo::new(generic_type_argument_ptr, reader);
+                    generic_type_args.push(t);
+                }
+            }
+            _ => {}
+        }
+
         FieldDefinition {
             type_info,
             name,
             offset,
+            generic_type_args,
         }
     }
 }

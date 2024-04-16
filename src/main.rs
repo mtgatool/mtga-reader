@@ -64,8 +64,8 @@ fn main() {
                     let class = TypeDefinition::new(definition, &mono_reader);
                     class.get_static_value(name)
                 }
-                _ => {
-                    let managed = Managed::new(&mono_reader, field.0);
+                _ => {                    
+                    let managed = Managed::new(&mono_reader, field.0, None);
                     let code = field.1.clone().code();
                     match code {
                         TypeCode::GENERICINST => {
@@ -88,13 +88,13 @@ fn main() {
 
         let code = field.1.clone().code();
 
-        let managed = Managed::new(&mono_reader, field.0);
+        let managed = Managed::new(&mono_reader, field.0, None);
         let strout = match code {
             TypeCode::CLASS => managed.read_class().to_string(),
             TypeCode::GENERICINST => managed.read_generic_instance(field.1.clone()).to_string(),
             TypeCode::SZARRAY => {
-                managed.read_managed_array();
-                String::from("{}")
+                let arr = managed.read_managed_array().unwrap();
+                arr.join(", ")
             }
             _ => {
                 println!("Code: {} strout not implemented", code);
