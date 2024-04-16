@@ -481,11 +481,11 @@ impl<'a> Managed<'a> {
 
     pub fn read_generic_instance(&self, type_info: TypeInfo) -> TypeDefinition {
         let ptr = self.reader.read_ptr(type_info.data);
-        let td = TypeDefinition::new(ptr, self.reader);
+        let mut td = TypeDefinition::new(ptr, self.reader);
+        td.set_generic_type_args(self.generic_type_args.clone());
 
         if td.is_value_type {
-            println!("Generic instance {}", self.addr);
-            return TypeDefinition::new(self.addr, self.reader);
+            return td; // TypeDefinition::new(self.addr, self.reader);
         }
 
         return td;
@@ -508,7 +508,7 @@ impl<'a> Managed<'a> {
         let element_definition =
             TypeDefinition::new(self.reader.read_ptr(array_definition_ptr), self.reader);
 
-        let count = 1 as i32;
+        let count = 2 as i32;
         // self
         // .reader
         // .read_i32(ptr + (crate::constants::SIZE_OF_PTR * 3));
@@ -545,8 +545,7 @@ impl<'a> Managed<'a> {
                 TypeCode::CLASS => managed.read_class().to_string(),
                 TypeCode::GENERICINST => {
                     let m = managed.read_generic_instance(element_definition.type_info.clone());
-
-                    String::from("")
+                    m.to_string()
                 }
                 _ => {
                     // println!("Code: {} strout not implemented", code);
@@ -927,8 +926,6 @@ impl<'a> TypeDefinition<'a> {
         let mut generic_type_args = Vec::new();
         let code = type_info.clone().code();
 
-        println!("Type code: {}", code);
-
         match code {
             TypeCode::GENERICINST => {
                 let mono_generic_class_address = type_info.clone().data;
@@ -952,6 +949,9 @@ impl<'a> TypeDefinition<'a> {
                     let generic_type_argument_ptr = reader
                         .read_ptr(type_arg_v_ptr + (i as usize * crate::constants::SIZE_OF_PTR));
                     let t = TypeInfo::new(generic_type_argument_ptr, reader);
+
+                    println!(" {}: {}", i, t.clone().code());
+
                     generic_type_args.push(t);
                 }
             }
@@ -1048,6 +1048,10 @@ impl<'a> TypeDefinition<'a> {
 
         return (def.offset as usize + ptr, def.type_info);
     }
+
+    pub fn set_generic_type_args(&mut self, generic_type_args: Vec<TypeInfo>) {
+        self.generic_type_args = generic_type_args;
+    }
 }
 
 impl fmt::Display for TypeDefinition<'_> {
@@ -1123,17 +1127,21 @@ impl fmt::Display for TypeDefinition<'_> {
                     // }
 
                     let mut offset: i32 = 0;
-                    for _i in 0..number_of_generic_argument {
-                        // let arg = self.generic_type_args[i as usize].clone().code();
-                        offset += get_type_size(TypeCode::U4) as i32
-                            - crate::constants::SIZE_OF_PTR as i32;
+                    for i in 0..number_of_generic_argument {
+                        let arg = self.generic_type_args[i as usize].clone().code();
+                        offset += get_type_size(arg) as i32 - crate::constants::SIZE_OF_PTR as i32;
                     }
 
-                    let managed =
-                        Managed::new(&self.reader, ptr + field_def.offset as usize - 4, None);
+                    // println!("offset: {}", offset);
+
+                    let managed = Managed::new(
+                        &self.reader,
+                        ptr + (field_def.offset as i32 + offset) as usize,
+                        Some(self.generic_type_args.clone()),
+                    );
                     let var = managed.read_var();
 
-                    fields_str.push(format!("\"{}\": {}", field_def.name, ptr));
+                    fields_str.push(format!("\"{}\": {}", field_def.name, var));
                 }
                 _ => {
                     fields_str.push(format!("\"{}\": {}, {}", field_def.name, code, "null"));
