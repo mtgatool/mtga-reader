@@ -408,8 +408,8 @@ impl<'a> Managed<'a> {
     }
 
     // read_i
-    pub fn read_i4(&self) -> i32 {
-        self.reader.read_i32(self.addr)
+    pub fn read_i4(&self) -> u32 {
+        self.reader.read_u32(self.addr)
     }
 
     pub fn read_i2(&self) -> i16 {
@@ -938,6 +938,8 @@ impl fmt::Display for TypeDefinition<'_> {
             let code = field_def.type_info.clone().code();
 
             let managed = Managed::new(&self.reader, ptr + field_def.offset as usize);
+
+            // println!("  {}: {}", field_def.name, field_def.type_info.code());
 
             match code {
                 TypeCode::BOOLEAN => {
