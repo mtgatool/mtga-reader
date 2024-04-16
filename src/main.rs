@@ -45,6 +45,7 @@ fn main() {
             "<InventoryManager>k__BackingField",
             "_inventoryServiceWrapper",
             "<Cards>k__BackingField",
+            "_entries",
         ];
 
         // get the type defs on the root of the assembly for the first loop
@@ -58,9 +59,6 @@ fn main() {
         let mut field = (definition.clone(), TypeInfo::new(definition, &mono_reader));
 
         for (index, name) in find.iter().enumerate() {
-            let code = field.1.clone();
-            println!("Find: {}: {}", name, code.code());
-
             field = match index {
                 0 => {
                     let class = TypeDefinition::new(definition, &mono_reader);
@@ -68,25 +66,42 @@ fn main() {
                 }
                 _ => {
                     let managed = Managed::new(&mono_reader, field.0);
-                    let class = managed.read_class();
-                    let ptr = mono_reader.read_ptr(field.0);
-                    class.get_value(name, ptr)
+                    let code = field.1.clone().code();
+                    match code {
+                        TypeCode::GENERICINST => {
+                            let class = managed.read_generic_instance(field.1.clone());
+                            let ptr = mono_reader.read_ptr(field.0);
+                            class.get_value(name, ptr)
+                        }
+                        _ => {
+                            // TypeCode::CLASS
+                            let class = managed.read_class();
+                            let ptr = mono_reader.read_ptr(field.0);
+                            class.get_value(name, ptr)
+                        }
+                    }
                 }
             };
+            let code = field.1.clone();
+            println!("Find: {}: {}", name, code.code());
         }
-
-        let code = field.1.clone().code();
-        println!("  {}", code);
 
         let code = field.1.clone().code();
 
         let managed = Managed::new(&mono_reader, field.0);
-        let class = match code {
-            TypeCode::CLASS => managed.read_class(),
-            TypeCode::GENERICINST => managed.read_generic_instance(field.1.clone()),
-            _ => managed.read_class(),
+        let strout = match code {
+            TypeCode::CLASS => managed.read_class().to_string(),
+            TypeCode::GENERICINST => managed.read_generic_instance(field.1.clone()).to_string(),
+            TypeCode::SZARRAY => {
+                managed.read_managed_array();
+                String::from("{}")
+            }
+            _ => {
+                println!("Code: {} strout not implemented", code);
+                String::from("{}")
+            }
         };
 
-        println!("{}", class);
+        println!("{}", strout);
     });
 }

@@ -908,7 +908,7 @@ impl<'a> TypeDefinition<'a> {
         for field in fields {
             let field_def = FieldDefinition::new(field, self.reader);
             let type_info = field_def.type_info.clone();
-            // let code = field_def.type_info.code();
+            let code = field_def.type_info.code();
             // println!("  field: {}, {}", field_def.name, code);
             if field_def.name == field_name {
                 return (field, type_info);
