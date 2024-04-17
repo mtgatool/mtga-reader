@@ -1146,8 +1146,6 @@ impl fmt::Display for TypeDefinition<'_> {
 
             let managed = Managed::new(&self.reader, ptr + offset as usize, None);
 
-
-
             let val = match code {
                 TypeCode::BOOLEAN => managed.read_boolean().to_string(),
                 TypeCode::U4 => managed.read_u4().to_string(),
@@ -1172,11 +1170,7 @@ impl fmt::Display for TypeDefinition<'_> {
                 val
             );
 
-            fields_str.push(format!(
-                "\"{}\": {}",
-                field_def.name,
-                val
-            ));
+            fields_str.push(format!("\"{}\": {}", field_def.name, val));
         }
         write!(f, "{{ {} }}", fields_str.join(", "))
     }
