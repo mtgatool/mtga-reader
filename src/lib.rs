@@ -485,7 +485,7 @@ impl<'a> Managed<'a> {
         td.set_generic_type_args(self.generic_type_args.clone());
 
         if td.is_value_type {
-            return td; // TypeDefinition::new(self.addr, self.reader);
+            return td;
         }
 
         return td;
@@ -540,6 +540,8 @@ impl<'a> Managed<'a> {
                 start + (i as usize * array_definition.size as usize),
                 Some(element_definition.generic_type_args.clone()),
             );
+
+            println!("Managed: {:?}", managed.addr);
 
             let strout = match code {
                 TypeCode::CLASS => managed.read_class().to_string(),
@@ -1132,19 +1134,37 @@ impl fmt::Display for TypeDefinition<'_> {
                         offset += get_type_size(arg) as i32 - crate::constants::SIZE_OF_PTR as i32;
                     }
 
-                    // println!("offset: {}", offset);
+                    println!("_ptr: {}, offset: {}", ptr, offset);
 
                     let managed = Managed::new(
                         &self.reader,
-                        ptr + (field_def.offset as i32 + offset) as usize,
+                        _field + (field_def.offset as i32 + offset) as usize,
                         Some(self.generic_type_args.clone()),
                     );
-                    let var = managed.read_var();
+
+                    // self.generic_type_args[number_of_generic_argument];
+                    let gen_type =
+                        self.generic_type_args[number_of_generic_argument as usize].clone();
+
+                    let var = match gen_type.clone().code() {
+                        TypeCode::I4 => managed.read_i4().to_string(),
+                        TypeCode::U4 => managed.read_u4().to_string(),
+                        TypeCode::R4 => managed.read_r4().to_string(),
+                        TypeCode::R8 => managed.read_r8().to_string(),
+                        TypeCode::I => managed.read_i4().to_string(),
+                        TypeCode::U => managed.read_u4().to_string(),
+                        TypeCode::I2 => managed.read_i2().to_string(),
+                        TypeCode::U2 => managed.read_u2().to_string(),
+                        TypeCode::STRING => managed.read_string(),
+                        _ => "0".to_string(),
+                    };
+
+                    println!("var: {}, code: {}", var, gen_type.clone().code());
 
                     fields_str.push(format!("\"{}\": {}", field_def.name, var));
                 }
                 _ => {
-                    fields_str.push(format!("\"{}\": {}, {}", field_def.name, code, "null"));
+                    fields_str.push(format!("\"{} ({})\": {}", field_def.name, code, "null"));
                 }
             }
         }

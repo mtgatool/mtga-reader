@@ -94,7 +94,7 @@ fn main() {
             TypeCode::GENERICINST => managed.read_generic_instance(field.1.clone()).to_string(),
             TypeCode::SZARRAY => {
                 let arr = managed.read_managed_array().unwrap();
-                arr.join(", ")
+                format!("[{}]", arr.join(", "))
             }
             _ => {
                 println!("Code: {} strout not implemented", code);
