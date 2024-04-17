@@ -4,6 +4,7 @@ use core::fmt::Formatter;
 use proc_mem::{ProcMemError, Process};
 use process_memory::{DataMember, Memory, ProcessHandle, TryIntoProcessHandle};
 use std::cmp;
+use std::fmt::format;
 use std::fmt::Display;
 
 pub mod constants;
@@ -197,6 +198,23 @@ impl MonoReader {
                     eprintln!("Error: {:?}", std::io::Error::last_os_error());
                     0
                 }
+            }
+        };
+
+        return val;
+    }
+
+    // All read_ methods should be wrapping a maybe_ method
+    // Ideally we should only use the maybe_read_ methods
+    pub fn maybe_read_u32(&self, addr: usize) -> Option<u32> {
+        let mut member = DataMember::<u32>::new(self.handle);
+
+        member.set_offset(vec![addr as usize]);
+
+        let val = unsafe {
+            match member.read() {
+                Ok(val) => Some(val),
+                Err(_e) => None,
             }
         };
 
@@ -508,29 +526,29 @@ impl<'a> Managed<'a> {
         let element_definition =
             TypeDefinition::new(self.reader.read_ptr(array_definition_ptr), self.reader);
 
-        let count = 2 as i32;
-        // self
-        // .reader
-        // .read_i32(ptr + (crate::constants::SIZE_OF_PTR * 3));
+        let count = self
+            .reader
+            .read_u32(ptr + (crate::constants::SIZE_OF_PTR * 3));
 
         let start = ptr + crate::constants::SIZE_OF_PTR * 4;
 
         let mut result = Vec::new();
 
-        println!("Array ptr: {:?}", ptr);
-        println!("Array vtable: {:?}", vtable);
-        println!(
-            "Array array_definition.address: {:?}",
-            array_definition.address
-        );
-        println!(
-            "Array element_definition.address: {:?}",
-            element_definition.address
-        );
-        println!(
-            "Array element_definition type: {}",
-            element_definition.type_info.clone().code()
-        );
+        // println!("Array vtable: {:?}", vtable);
+        // println!(
+        //     "Array array_definition.address: {:?}",
+        //     array_definition.address
+        // );
+        // println!(
+        //     "Array element_definition.address: {:?}",
+        //     element_definition.address
+        // );
+        // println!(
+        //     "Array element_definition type: {}",
+        //     element_definition.type_info.clone().code()
+        // );
+
+        let type_args = element_definition.generic_type_args.clone();
 
         let code = element_definition.type_info.clone().code();
 
@@ -538,16 +556,63 @@ impl<'a> Managed<'a> {
             let managed = Managed::new(
                 self.reader,
                 start + (i as usize * array_definition.size as usize),
-                Some(element_definition.generic_type_args.clone()),
+                Some(type_args.clone()),
             );
-
-            println!("Managed: {:?}", managed.addr);
 
             let strout = match code {
                 TypeCode::CLASS => managed.read_class().to_string(),
                 TypeCode::GENERICINST => {
                     let m = managed.read_generic_instance(element_definition.type_info.clone());
-                    m.to_string()
+
+                    let el_fields = m.get_fields();
+
+                    let mut fields_str: Vec<String> = Vec::new();
+                    for field in el_fields {
+                        let field_def = FieldDefinition::new(field, &self.reader);
+
+                        let number_of_generic_argument = self.reader.maybe_read_u32(
+                            field_def.type_info.clone().data + crate::constants::SIZE_OF_PTR,
+                        );
+
+                        let mut offset: i32 = 0;
+
+                        let gen_type = match number_of_generic_argument {
+                            Some(number_of_generic_argument) => {
+                                // get the offset for this arg
+                                for i in 0..(number_of_generic_argument as i32) {
+                                    let arg = type_args[i as usize].clone().code();
+                                    offset += get_type_size(arg) as i32
+                                        - crate::constants::SIZE_OF_PTR as i32;
+                                }
+                                // get the type of the value
+                                type_args[number_of_generic_argument as usize].clone()
+                            }
+                            None => field_def.type_info.clone(),
+                        };
+
+                        let managed_var = Managed::new(
+                            self.reader,
+                            managed.addr + (field_def.offset + offset) as usize,
+                            None,
+                        );
+
+                        let var = match gen_type.clone().code() {
+                            TypeCode::I4 => managed_var.read_i4().to_string(),
+                            TypeCode::U4 => managed_var.read_u4().to_string(),
+                            TypeCode::R4 => managed_var.read_r4().to_string(),
+                            TypeCode::R8 => managed_var.read_r8().to_string(),
+                            TypeCode::I => managed_var.read_i4().to_string(),
+                            TypeCode::U => managed_var.read_u4().to_string(),
+                            TypeCode::I2 => managed_var.read_i2().to_string(),
+                            TypeCode::U2 => managed_var.read_u2().to_string(),
+                            TypeCode::STRING => managed_var.read_string(),
+                            _ => "null".to_string(),
+                        };
+
+                        fields_str.push(format!("\"{}\": {}", field_def.name, var));
+                    }
+
+                    format!("{{{}}}", fields_str.join(","))
                 }
                 _ => {
                     // println!("Code: {} strout not implemented", code);
@@ -952,7 +1017,7 @@ impl<'a> TypeDefinition<'a> {
                         .read_ptr(type_arg_v_ptr + (i as usize * crate::constants::SIZE_OF_PTR));
                     let t = TypeInfo::new(generic_type_argument_ptr, reader);
 
-                    println!(" {}: {}", i, t.clone().code());
+                    // println!(" {}: {}", i, t.clone().code());
 
                     generic_type_args.push(t);
                 }
@@ -1068,7 +1133,17 @@ impl fmt::Display for TypeDefinition<'_> {
 
             let code = field_def.type_info.clone().code();
 
-            let managed = Managed::new(&self.reader, ptr + field_def.offset as usize, None);
+            let offset_a = field_def.offset as usize;
+
+            let offset_b = field_def.offset as usize - (crate::constants::SIZE_OF_PTR * 2);
+
+            let offset = if self.is_value_type {
+                offset_b
+            } else {
+                offset_a
+            };
+
+            let managed = Managed::new(&self.reader, ptr + offset, None);
 
             // println!("  {}: {}", field_def.name, field_def.type_info.code());
 
@@ -1118,6 +1193,7 @@ impl fmt::Display for TypeDefinition<'_> {
                         managed.read_valuetype()
                     ));
                 }
+                /*
                 TypeCode::VAR => {
                     let number_of_generic_argument = self
                         .reader
@@ -1134,11 +1210,9 @@ impl fmt::Display for TypeDefinition<'_> {
                         offset += get_type_size(arg) as i32 - crate::constants::SIZE_OF_PTR as i32;
                     }
 
-                    println!("_ptr: {}, offset: {}", ptr, offset);
-
                     let managed = Managed::new(
                         &self.reader,
-                        _field + (field_def.offset as i32 + offset) as usize,
+                        ptr + (field_def.offset as i32 + offset) as usize,
                         Some(self.generic_type_args.clone()),
                     );
 
@@ -1163,6 +1237,7 @@ impl fmt::Display for TypeDefinition<'_> {
 
                     fields_str.push(format!("\"{}\": {}", field_def.name, var));
                 }
+                */
                 _ => {
                     fields_str.push(format!("\"{} ({})\": {}", field_def.name, code, "null"));
                 }

@@ -64,7 +64,7 @@ fn main() {
                     let class = TypeDefinition::new(definition, &mono_reader);
                     class.get_static_value(name)
                 }
-                _ => {                    
+                _ => {
                     let managed = Managed::new(&mono_reader, field.0, None);
                     let code = field.1.clone().code();
                     match code {
@@ -95,6 +95,7 @@ fn main() {
             TypeCode::SZARRAY => {
                 let arr = managed.read_managed_array().unwrap();
                 format!("[{}]", arr.join(", "))
+                // String::from("")
             }
             _ => {
                 println!("Code: {} strout not implemented", code);
