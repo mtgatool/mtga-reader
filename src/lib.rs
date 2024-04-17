@@ -422,8 +422,8 @@ impl<'a> Managed<'a> {
     }
 
     // read_u
-    pub fn read_u4(&self) -> u16 {
-        self.reader.read_u16(self.addr)
+    pub fn read_u4(&self) -> u32 {
+        self.reader.read_u32(self.addr)
     }
 
     pub fn read_r4(&self) -> i32 {
@@ -435,8 +435,8 @@ impl<'a> Managed<'a> {
     }
 
     // read_i
-    pub fn read_i4(&self) -> u32 {
-        self.reader.read_u32(self.addr)
+    pub fn read_i4(&self) -> i32 {
+        self.reader.read_i32(self.addr)
     }
 
     pub fn read_i2(&self) -> i16 {
@@ -526,9 +526,10 @@ impl<'a> Managed<'a> {
         let element_definition =
             TypeDefinition::new(self.reader.read_ptr(array_definition_ptr), self.reader);
 
-        let count = self
-            .reader
-            .read_u32(ptr + (crate::constants::SIZE_OF_PTR * 3));
+        let count = 2 as u32;
+        // self
+        //     .reader
+        //     .read_u32(ptr + (crate::constants::SIZE_OF_PTR * 3));
 
         let start = ptr + crate::constants::SIZE_OF_PTR * 4;
 
@@ -1124,8 +1125,8 @@ impl<'a> TypeDefinition<'a> {
 impl fmt::Display for TypeDefinition<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut fields_str: Vec<String> = Vec::new();
+        let ptr = self.reader.read_ptr(self.address);
         for _field in self.get_fields() {
-            let ptr = &self.reader.read_ptr(self.address);
             let field_def = FieldDefinition::new(_field, &self.reader);
             if field_def.type_info.clone().is_const {
                 continue;
@@ -1133,9 +1134,9 @@ impl fmt::Display for TypeDefinition<'_> {
 
             let code = field_def.type_info.clone().code();
 
-            let offset_a = field_def.offset as usize;
+            let offset_a = field_def.offset;
 
-            let offset_b = field_def.offset as usize - (crate::constants::SIZE_OF_PTR * 2);
+            let offset_b = field_def.offset - (crate::constants::SIZE_OF_PTR as i32 * 2);
 
             let offset = if self.is_value_type {
                 offset_b
@@ -1143,105 +1144,39 @@ impl fmt::Display for TypeDefinition<'_> {
                 offset_a
             };
 
-            let managed = Managed::new(&self.reader, ptr + offset, None);
+            let managed = Managed::new(&self.reader, ptr + offset as usize, None);
 
-            // println!("  {}: {}", field_def.name, field_def.type_info.code());
 
-            match code {
-                TypeCode::BOOLEAN => {
-                    fields_str.push(format!(
-                        "\"{}\": {}",
-                        field_def.name,
-                        managed.read_boolean()
-                    ));
-                }
-                TypeCode::U4 => {
-                    fields_str.push(format!("\"{}\": {}", field_def.name, managed.read_u4()));
-                }
-                TypeCode::U => {
-                    fields_str.push(format!("\"{}\": {}", field_def.name, managed.read_u4()));
-                }
-                TypeCode::R4 => {
-                    fields_str.push(format!("\"{}\": {}", field_def.name, managed.read_r4()));
-                }
-                TypeCode::R8 => {
-                    fields_str.push(format!("\"{}\": {}", field_def.name, managed.read_r8()));
-                }
-                TypeCode::I4 => {
-                    fields_str.push(format!("\"{}\": {}", field_def.name, managed.read_i4()));
-                }
-                TypeCode::I => {
-                    fields_str.push(format!("\"{}\": {}", field_def.name, managed.read_i4()));
-                }
-                TypeCode::I2 => {
-                    fields_str.push(format!("\"{}\": {}", field_def.name, managed.read_i2()));
-                }
-                TypeCode::U2 => {
-                    fields_str.push(format!("\"{}\": {}", field_def.name, managed.read_u2()));
-                }
-                TypeCode::STRING => {
-                    fields_str.push(format!(
-                        "\"{}\": \"{}\"",
-                        field_def.name,
-                        managed.read_string()
-                    ));
-                }
-                TypeCode::VALUETYPE => {
-                    fields_str.push(format!(
-                        "\"{}\": {}",
-                        field_def.name,
-                        managed.read_valuetype()
-                    ));
-                }
-                /*
-                TypeCode::VAR => {
-                    let number_of_generic_argument = self
-                        .reader
-                        .read_u32(field_def.type_info.clone().data + crate::constants::SIZE_OF_PTR);
 
-                    // println!("number_of_generic_argument: {}", number_of_generic_argument);
-                    // for arg in self.generic_type_args.iter() {
-                    //     println!("- code: {}", arg.clone().code());
-                    // }
+            let val = match code {
+                TypeCode::BOOLEAN => managed.read_boolean().to_string(),
+                TypeCode::U4 => managed.read_u4().to_string(),
+                TypeCode::U => managed.read_u4().to_string(),
+                TypeCode::R4 => managed.read_r4().to_string(),
+                TypeCode::R8 => managed.read_r8().to_string(),
+                TypeCode::I4 => managed.read_i4().to_string(),
+                TypeCode::I => managed.read_i4().to_string(),
+                TypeCode::I2 => managed.read_i2().to_string(),
+                TypeCode::U2 => managed.read_u2().to_string(),
+                TypeCode::STRING => managed.read_string().to_string(),
+                TypeCode::VALUETYPE => managed.read_valuetype().to_string(),
+                _ => "null".to_string(),
+            };
 
-                    let mut offset: i32 = 0;
-                    for i in 0..number_of_generic_argument {
-                        let arg = self.generic_type_args[i as usize].clone().code();
-                        offset += get_type_size(arg) as i32 - crate::constants::SIZE_OF_PTR as i32;
-                    }
+            println!(
+                "  {} {};  offset: {},  {} = {}",
+                ptr,
+                field_def.name,
+                offset,
+                field_def.type_info.code(),
+                val
+            );
 
-                    let managed = Managed::new(
-                        &self.reader,
-                        ptr + (field_def.offset as i32 + offset) as usize,
-                        Some(self.generic_type_args.clone()),
-                    );
-
-                    // self.generic_type_args[number_of_generic_argument];
-                    let gen_type =
-                        self.generic_type_args[number_of_generic_argument as usize].clone();
-
-                    let var = match gen_type.clone().code() {
-                        TypeCode::I4 => managed.read_i4().to_string(),
-                        TypeCode::U4 => managed.read_u4().to_string(),
-                        TypeCode::R4 => managed.read_r4().to_string(),
-                        TypeCode::R8 => managed.read_r8().to_string(),
-                        TypeCode::I => managed.read_i4().to_string(),
-                        TypeCode::U => managed.read_u4().to_string(),
-                        TypeCode::I2 => managed.read_i2().to_string(),
-                        TypeCode::U2 => managed.read_u2().to_string(),
-                        TypeCode::STRING => managed.read_string(),
-                        _ => "0".to_string(),
-                    };
-
-                    println!("var: {}, code: {}", var, gen_type.clone().code());
-
-                    fields_str.push(format!("\"{}\": {}", field_def.name, var));
-                }
-                */
-                _ => {
-                    fields_str.push(format!("\"{} ({})\": {}", field_def.name, code, "null"));
-                }
-            }
+            fields_str.push(format!(
+                "\"{}\": {}",
+                field_def.name,
+                val
+            ));
         }
         write!(f, "{{ {} }}", fields_str.join(", "))
     }
