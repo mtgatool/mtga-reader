@@ -4,7 +4,7 @@ use core::fmt::Formatter;
 use proc_mem::{ProcMemError, Process};
 use process_memory::{DataMember, Memory, ProcessHandle, TryIntoProcessHandle};
 use std::cmp;
-use std::fmt::format;
+
 use std::fmt::Display;
 
 pub mod constants;
@@ -505,10 +505,10 @@ impl<'a> Managed<'a> {
 
     // pub fn read_managed_array<T>(&self) -> Option<T>
 
-    pub fn read_managed_array(&self) -> Option<Vec<String>> {
+    pub fn read_managed_array(&self) -> String {
         let ptr = self.reader.read_ptr(self.addr);
         if ptr == 0 {
-            return None;
+            return String::from("null");
         }
 
         let vtable = self.reader.read_ptr(ptr);
@@ -618,7 +618,7 @@ impl<'a> Managed<'a> {
             result.push(strout);
         }
 
-        return Some(result);
+        return format!("[{}]", result.join(", "));
     }
 
     pub fn read_var(&self) -> u32 {
@@ -626,16 +626,6 @@ impl<'a> Managed<'a> {
 
         return ptr;
     }
-
-    // pub fn read_managed_struct_instance<T>(&self) -> Option<T>
-
-    // pub fn read_managed_class_instance<T>(&self) -> Option<T>
-
-    // pub fn read_managed_generic_object<T>(&self) -> Option<T>
-
-    // pub fn read_managed_var<T>(&self) -> Option<T>
-
-    // pub fn read_managed_object<T>(&self) -> Option<T>
 }
 
 /*
@@ -925,6 +915,7 @@ pub struct TypeDefinition<'a> {
     pub is_enum: bool,
     pub is_value_type: bool,
     pub generic_type_args: Vec<TypeInfo>,
+    pub fields_base: usize,
 }
 
 impl<'a> TypeDefinition<'a> {
@@ -1020,6 +1011,8 @@ impl<'a> TypeDefinition<'a> {
             _ => {}
         }
 
+        let fields_base = definition_addr;
+
         TypeDefinition {
             address: definition_addr,
             reader,
@@ -1038,6 +1031,7 @@ impl<'a> TypeDefinition<'a> {
             is_enum,
             is_value_type,
             generic_type_args,
+            fields_base,
         }
     }
 
@@ -1114,16 +1108,15 @@ impl<'a> TypeDefinition<'a> {
     pub fn set_generic_type_args(&mut self, generic_type_args: Vec<TypeInfo>) {
         self.generic_type_args = generic_type_args;
     }
+
+    pub fn set_fields_base(&mut self, addr: usize) {
+        self.fields_base = addr;
+    }
 }
 
 impl fmt::Display for TypeDefinition<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut fields_str: Vec<String> = Vec::new();
-        let ptr = self.reader.read_ptr(self.address);
-        println!(
-            "TypeDefinition: {:?}, {} {}",
-            ptr, &self.address, &self.name
-        );
 
         for _field in self.get_fields() {
             let field_def = FieldDefinition::new(_field, &self.reader);
@@ -1143,7 +1136,7 @@ impl fmt::Display for TypeDefinition<'_> {
                 offset_a
             };
 
-            let managed = Managed::new(&self.reader, self.address + offset as usize, None);
+            let managed = Managed::new(&self.reader, self.fields_base + offset as usize, None);
 
             let val = match code {
                 TypeCode::BOOLEAN => managed.read_boolean().to_string(),
@@ -1155,18 +1148,18 @@ impl fmt::Display for TypeDefinition<'_> {
                 TypeCode::I => managed.read_i4().to_string(),
                 TypeCode::I2 => managed.read_i2().to_string(),
                 TypeCode::U2 => managed.read_u2().to_string(),
-                TypeCode::STRING => managed.read_string().to_string(),
+                TypeCode::STRING => format!("\"{}\"", managed.read_string().to_string()),
                 TypeCode::VALUETYPE => managed.read_valuetype().to_string(),
                 _ => "null".to_string(),
             };
 
-            println!(
-                "  {} {} {} => {}",
-                self.address + offset as usize,
-                field_def.name,
-                field_def.type_info.code(),
-                val
-            );
+            // println!(
+            //     "  {} {} {} => {}",
+            //     self.fields_base + offset as usize,
+            //     field_def.name,
+            //     field_def.type_info.code(),
+            //     val
+            // );
 
             fields_str.push(format!("\"{}\": {}", field_def.name, val));
         }
