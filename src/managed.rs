@@ -8,8 +8,8 @@ use std::cmp;
 
 pub struct Managed<'a> {
     reader: &'a MonoReader,
-    addr: usize,
-    generic_type_args: Vec<TypeInfo>,
+    pub addr: usize,
+    pub generic_type_args: Vec<TypeInfo>,
 }
 
 impl<'a> Managed<'a> {
@@ -219,7 +219,14 @@ impl<'a> Managed<'a> {
                             TypeCode::I2 => managed_var.read_i2().to_string(),
                             TypeCode::U2 => managed_var.read_u2().to_string(),
                             TypeCode::STRING => managed_var.read_string(),
-                            _ => "null".to_string(),
+                            TypeCode::CLASS => {
+                                let mut class = managed_var.read_class();
+                                let ptr = self.reader.read_ptr(managed_var.addr);
+                                class.set_fields_base(ptr);
+                                class.to_string()
+                            },
+                            // (field_def.type_info.code()).to_string(),
+                            _ => "null".to_string()
                         };
 
                         fields_str.push(format!("\"{}\": {}", field_def.name, var));
