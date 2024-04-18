@@ -1,8 +1,8 @@
 use proc_mem::{ProcMemError, Process};
 use process_memory::{DataMember, Memory, ProcessHandle, TryIntoProcessHandle};
 
-use crate::pe_reader::PEReader;
 use crate::constants;
+use crate::pe_reader::PEReader;
 
 pub struct MonoReader {
     pid: u32,

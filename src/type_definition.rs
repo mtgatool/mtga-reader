@@ -256,13 +256,13 @@ impl fmt::Display for TypeDefinition<'_> {
                 _ => "null".to_string(),
             };
 
-            println!(
-                "  {} {} {} => {}",
-                self.fields_base + offset as usize,
-                self.is_value_type,
-                field_def.name,
-                field_def.type_info.code(),
-            );
+            // println!(
+            //     "  {} {} {} => {}",
+            //     self.fields_base + offset as usize,
+            //     self.is_value_type,
+            //     field_def.name,
+            //     field_def.type_info.code(),
+            // );
 
             fields_str.push(format!("\"{}\": {}", field_def.name, val));
         }

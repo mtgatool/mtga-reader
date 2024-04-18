@@ -1,7 +1,7 @@
+use crate::constants;
 use crate::mono_reader::MonoReader;
 use crate::type_code::TypeCode;
 use crate::type_info::TypeInfo;
-use crate::constants;
 
 pub struct FieldDefinition {
     pub type_info: TypeInfo,
@@ -28,22 +28,21 @@ impl FieldDefinition {
                 let mono_class_address = reader.read_ptr(mono_generic_class_address);
                 // this.Image.GetTypeDefinition(mono_class_address);
 
-                let mono_generic_container_ptr = mono_class_address
-                    + constants::TYPE_DEFINITION_GENERIC_CONTAINER as usize;
+                let mono_generic_container_ptr =
+                    mono_class_address + constants::TYPE_DEFINITION_GENERIC_CONTAINER as usize;
                 let mono_generic_container_address = reader.read_ptr(mono_generic_container_ptr);
 
-                let mono_generic_context_ptr =
-                    mono_generic_class_address + constants::SIZE_OF_PTR;
+                let mono_generic_context_ptr = mono_generic_class_address + constants::SIZE_OF_PTR;
                 let mono_generic_ins_ptr = reader.read_ptr(mono_generic_context_ptr);
 
                 // var argument_count = this.Process.ReadInt32(mono_generic_ins_ptr + 0x4);
-                let argument_count = reader
-                    .read_u32(mono_generic_container_address + (4 * constants::SIZE_OF_PTR));
+                let argument_count =
+                    reader.read_u32(mono_generic_container_address + (4 * constants::SIZE_OF_PTR));
                 let type_arg_v_ptr = mono_generic_ins_ptr + 0x8;
 
                 for i in 0..argument_count {
-                    let generic_type_argument_ptr = reader
-                        .read_ptr(type_arg_v_ptr + (i as usize * constants::SIZE_OF_PTR));
+                    let generic_type_argument_ptr =
+                        reader.read_ptr(type_arg_v_ptr + (i as usize * constants::SIZE_OF_PTR));
                     let t = TypeInfo::new(generic_type_argument_ptr, reader);
                     generic_type_args.push(t);
                 }

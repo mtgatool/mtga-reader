@@ -1,6 +1,6 @@
 use std::fmt;
-use std::fmt::Formatter;
 use std::fmt::Debug;
+use std::fmt::Formatter;
 
 #[derive(Clone)]
 pub enum MonoClassKind {
