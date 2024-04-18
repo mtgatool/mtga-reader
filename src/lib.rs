@@ -186,24 +186,6 @@ impl MonoReader {
         return val;
     }
 
-    pub fn read_u32(&self, addr: usize) -> u32 {
-        let mut member = DataMember::<u32>::new(self.handle);
-
-        member.set_offset(vec![addr as usize]);
-
-        let val = unsafe {
-            match member.read() {
-                Ok(val) => val,
-                Err(_e) => {
-                    eprintln!("Error: {:?}", std::io::Error::last_os_error());
-                    0
-                }
-            }
-        };
-
-        return val;
-    }
-
     // All read_ methods should be wrapping a maybe_ method
     // Ideally we should only use the maybe_read_ methods
     pub fn maybe_read_u32(&self, addr: usize) -> Option<u32> {
@@ -215,6 +197,18 @@ impl MonoReader {
             match member.read() {
                 Ok(val) => Some(val),
                 Err(_e) => None,
+            }
+        };
+
+        return val;
+    }
+
+    pub fn read_u32(&self, addr: usize) -> u32 {
+        let val = match self.maybe_read_u32(addr) {
+            Some(val) => val,
+            None => {
+                eprintln!("Error: {:?}", std::io::Error::last_os_error());
+                0
             }
         };
 
@@ -476,14 +470,14 @@ impl<'a> Managed<'a> {
     }
 
     pub fn read_class_address(&self) -> usize {
-        let ptr = self.reader.read_ptr(self.addr);
+        let ptr: usize = self.reader.read_ptr(self.addr);
         let vtable = self.reader.read_ptr(ptr);
         let definition_addr = self.reader.read_ptr(vtable);
 
-        // println!("ptr: {:?}", ptr);
-        // println!("self.addr: {:?}", self.addr);
-        // println!("vtable: {:?}", vtable);
-        // println!("definition_addr: {:?}", definition_addr);
+        println!("ptr: {:?}", ptr);
+        println!("self.addr: {:?}", self.addr);
+        println!("vtable: {:?}", vtable);
+        println!("definition_addr: {:?}", definition_addr);
 
         return definition_addr;
     }
@@ -1126,6 +1120,11 @@ impl fmt::Display for TypeDefinition<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut fields_str: Vec<String> = Vec::new();
         let ptr = self.reader.read_ptr(self.address);
+        println!(
+            "TypeDefinition: {:?}, {} {}",
+            ptr, &self.address, &self.name
+        );
+
         for _field in self.get_fields() {
             let field_def = FieldDefinition::new(_field, &self.reader);
             if field_def.type_info.clone().is_const {
@@ -1144,7 +1143,7 @@ impl fmt::Display for TypeDefinition<'_> {
                 offset_a
             };
 
-            let managed = Managed::new(&self.reader, ptr + offset as usize, None);
+            let managed = Managed::new(&self.reader, self.address + offset as usize, None);
 
             let val = match code {
                 TypeCode::BOOLEAN => managed.read_boolean().to_string(),
@@ -1162,10 +1161,9 @@ impl fmt::Display for TypeDefinition<'_> {
             };
 
             println!(
-                "  {} {};  offset: {},  {} = {}",
-                ptr,
+                "  {} {} {} => {}",
+                self.address + offset as usize,
                 field_def.name,
-                offset,
                 field_def.type_info.code(),
                 val
             );

@@ -40,12 +40,10 @@ fn main() {
         let defs = mono_reader.create_type_definitions();
 
         let find = [
-            "WrapperController",
-            "<Instance>k__BackingField",
-            "<InventoryManager>k__BackingField",
-            "_inventoryServiceWrapper",
-            "<Cards>k__BackingField",
-            "_entries",
+            "PAPA",
+            "_instance",
+            "_matchManager",
+            "<LocalPlayerInfo>k__BackingField",
         ];
 
         // get the type defs on the root of the assembly for the first loop
@@ -90,7 +88,10 @@ fn main() {
 
         let managed = Managed::new(&mono_reader, field.0, None);
         let strout = match code {
-            TypeCode::CLASS => managed.read_class().to_string(),
+            TypeCode::CLASS => {
+                let class = managed.read_class();
+                class.to_string()
+            }
             TypeCode::GENERICINST => managed.read_generic_instance(field.1.clone()).to_string(),
             TypeCode::SZARRAY => {
                 let arr = managed.read_managed_array().unwrap();
