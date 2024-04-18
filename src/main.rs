@@ -1,5 +1,10 @@
-use mtga_reader::{FieldDefinition, Managed, MonoReader, TypeCode, TypeDefinition, TypeInfo};
 use sysinfo::{Pid as SysPid, System};
+
+use mtga_reader::managed::Managed;
+use mtga_reader::mono_reader::MonoReader;
+use mtga_reader::type_code::TypeCode;
+use mtga_reader::type_definition::TypeDefinition;
+use mtga_reader::type_info::TypeInfo;
 
 fn find_pid_by_name(name: &str) -> Option<SysPid> {
     let mut sys = System::new_all();
