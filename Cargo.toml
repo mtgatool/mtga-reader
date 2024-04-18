@@ -6,6 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+napi-derive = "2.16.3"
 proc_mem = "0.1.6"
 process-memory = "0.5.0"
 read-process-memory = "0.1.6"
