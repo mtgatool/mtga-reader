@@ -42,8 +42,9 @@ fn main() {
         let find = [
             "PAPA",
             "_instance",
-            "_matchManager",
-            "<LocalPlayerInfo>k__BackingField",
+            "_inventoryManager",
+            "_inventoryServiceWrapper",
+            "m_inventory",
         ];
 
         // let find = [
