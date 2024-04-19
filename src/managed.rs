@@ -138,10 +138,10 @@ impl<'a> Managed<'a> {
         let element_definition =
             TypeDefinition::new(self.reader.read_ptr(array_definition_ptr), self.reader);
 
-        let count = 2 as u32;
-        // self
-        //     .reader
-        //     .read_u32(ptr + (constants::SIZE_OF_PTR * 3));
+        let count =
+        self
+            .reader
+            .read_u32(ptr + (constants::SIZE_OF_PTR * 3));
 
         let start = ptr + constants::SIZE_OF_PTR * 4;
 

@@ -16,6 +16,8 @@ use type_code::TypeCode;
 use type_definition::TypeDefinition;
 use type_info::TypeInfo;
 
+use serde_json::json;
+
 use napi_derive::napi;
 
 pub fn find_pid_by_name(name: &str) -> Option<SysPid> {
@@ -30,7 +32,7 @@ pub fn find_pid_by_name(name: &str) -> Option<SysPid> {
 
 pub fn get_def_by_name<'a>(
     defs: &'a Vec<usize>,
-    name: &str,
+    name: String,
     mono_reader: &MonoReader,
 ) -> Option<&'a usize> {
     defs.iter().find(|def| {
@@ -40,13 +42,13 @@ pub fn get_def_by_name<'a>(
 }
 
 #[napi]
-pub fn read_data(process_name: String, fields: Vec<&str>) -> String {
+pub fn read_data(process_name: String, fields: Vec<String>) -> serde_json::Value {
     println!("Reading started...");
 
     let pid = find_pid_by_name(&process_name);
 
     if pid.is_none() {
-        return String::from("Process not found");
+        return json!({ "error": "Process not found" });
     }
 
     let mut return_string: String = String::new();
@@ -59,7 +61,7 @@ pub fn read_data(process_name: String, fields: Vec<&str>) -> String {
         let defs = mono_reader.create_type_definitions();
 
         // get the type defs on the root of the assembly for the first loop
-        let definition = get_def_by_name(&defs, fields[0], &mono_reader)
+        let definition = get_def_by_name(&defs, fields[0].clone(), &mono_reader)
             .unwrap()
             .clone();
 
@@ -114,7 +116,14 @@ pub fn read_data(process_name: String, fields: Vec<&str>) -> String {
         return_string = strout.clone();
     });
 
-    return_string
+    let json = serde_json::from_str(&return_string);
+    return match json {
+        Ok(j) => j,
+        Err(e) => {
+            println!("Error: {}", e);
+            serde_json::from_str(&format!("{{ \"error\": \"{}\" }}", e)).unwrap()
+        }
+    };
 }
 
 /*
