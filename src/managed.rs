@@ -224,9 +224,9 @@ impl<'a> Managed<'a> {
                                 let ptr = self.reader.read_ptr(managed_var.addr);
                                 class.set_fields_base(ptr);
                                 class.to_string()
-                            },
+                            }
                             // (field_def.type_info.code()).to_string(),
-                            _ => "null".to_string()
+                            _ => "null".to_string(),
                         };
 
                         fields_str.push(format!("\"{}\": {}", field_def.name, var));

@@ -1,14 +1,24 @@
 [package]
-name = "mtga-reader"
-version = "0.1.0"
 edition = "2021"
+name = "mtga-reader"
+version = "0.0.0"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+crate-type = ["cdylib"]
 
 [dependencies]
-napi-derive = "2.16.3"
+# Default enable napi4 feature, see https://nodejs.org/api/n-api.html#node-api-version-matrix
+napi = { version = "2.12.2", default-features = false, features = ["napi4"] }
+napi-derive = "2.12.2"
 proc_mem = "0.1.6"
 process-memory = "0.5.0"
 read-process-memory = "0.1.6"
-sysinfo = "0.30.7"
+sysinfo = "0.30.11"
 winapi = { version = "0.3.9", features = ["winuser", "winbase", "winnt", "psapi", "tlhelp32"] }
+
+[build-dependencies]
+napi-build = "2.0.1"
+
+[profile.release]
+lto = true
+strip = "symbols"
