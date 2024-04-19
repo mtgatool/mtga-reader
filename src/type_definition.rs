@@ -223,48 +223,48 @@ impl fmt::Display for TypeDefinition<'_> {
 
         for _field in self.get_fields() {
             let field_def = FieldDefinition::new(_field, &self.reader);
-            if field_def.type_info.clone().is_const {
-                continue;
+            if !field_def.type_info.clone().is_const && !field_def.type_info.clone().is_static {
+                let code = field_def.type_info.clone().code();
+
+                let offset_a = field_def.offset;
+
+                let offset_b = field_def.offset - (constants::SIZE_OF_PTR as i32 * 2);
+
+                let offset = if self.is_value_type {
+                    offset_b
+                } else {
+                    offset_a
+                };
+
+                let managed = Managed::new(&self.reader, self.fields_base + offset as usize, None);
+
+                let val = match code {
+                    TypeCode::BOOLEAN => managed.read_boolean().to_string(),
+                    TypeCode::U4 => managed.read_u4().to_string(),
+                    TypeCode::U => managed.read_u4().to_string(),
+                    TypeCode::R4 => managed.read_r4().to_string(),
+                    TypeCode::R8 => managed.read_r8().to_string(),
+                    TypeCode::I4 => managed.read_i4().to_string(),
+                    TypeCode::I => managed.read_i4().to_string(),
+                    TypeCode::I2 => managed.read_i2().to_string(),
+                    TypeCode::U2 => managed.read_u2().to_string(),
+                    TypeCode::STRING => format!("\"{}\"", managed.read_string().to_string()),
+                    TypeCode::VALUETYPE => managed.read_valuetype().to_string(),
+                    _ => "null".to_string(),
+                };
+
+                // println!(
+                //     " - {} {} {} => {} {} {}",
+                //     self.fields_base + offset as usize,
+                //     field_def.name,
+                //     field_def.type_info.clone().is_const,
+                //     field_def.type_info.clone().is_static,
+                //     field_def.type_info.clone().code(),
+                //     val
+                // );
+
+                fields_str.push(format!("\"{}\": {}", field_def.name, val));
             }
-
-            let code = field_def.type_info.clone().code();
-
-            let offset_a = field_def.offset;
-
-            let offset_b = field_def.offset - (constants::SIZE_OF_PTR as i32 * 2);
-
-            let offset = if self.is_value_type {
-                offset_b
-            } else {
-                offset_a
-            };
-
-            let managed = Managed::new(&self.reader, self.fields_base + offset as usize, None);
-
-            let val = match code {
-                TypeCode::BOOLEAN => managed.read_boolean().to_string(),
-                TypeCode::U4 => managed.read_u4().to_string(),
-                TypeCode::U => managed.read_u4().to_string(),
-                TypeCode::R4 => managed.read_r4().to_string(),
-                TypeCode::R8 => managed.read_r8().to_string(),
-                TypeCode::I4 => managed.read_i4().to_string(),
-                TypeCode::I => managed.read_i4().to_string(),
-                TypeCode::I2 => managed.read_i2().to_string(),
-                TypeCode::U2 => managed.read_u2().to_string(),
-                TypeCode::STRING => format!("\"{}\"", managed.read_string().to_string()),
-                TypeCode::VALUETYPE => managed.read_valuetype().to_string(),
-                _ => "null".to_string(),
-            };
-
-            // println!(
-            //     " - {} {} {} => {}",
-            //     self.fields_base + offset as usize,
-            //     field_def.name,
-            //     field_def.type_info.code(),
-            //     val
-            // );
-
-            fields_str.push(format!("\"{}\": {}", field_def.name, val));
         }
         write!(f, "{{ {} }}", fields_str.join(", "))
     }
