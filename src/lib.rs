@@ -116,7 +116,11 @@ pub fn read_data(process_name: String, fields: Vec<String>) -> serde_json::Value
         return_string = strout.clone();
     });
 
-    let json = serde_json::from_str(&return_string);
+    let clean_str = return_string
+        .chars()
+        .filter(|c| !c.is_control())
+        .collect::<String>();
+    let json = serde_json::from_str(&clean_str);
     return match json {
         Ok(j) => j,
         Err(e) => {
