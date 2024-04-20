@@ -1,4 +1,6 @@
+#[cfg(target_os = "windows")]
 use proc_mem::{ProcMemError, Process};
+
 use process_memory::{DataMember, Memory, ProcessHandle, TryIntoProcessHandle};
 
 use crate::constants;
@@ -22,6 +24,7 @@ impl MonoReader {
         }
     }
 
+    #[cfg(target_os = "windows")]
     pub fn read_mono_root_domain(&mut self) -> usize {
         let mtga_process = match Process::with_pid(*&self.pid) {
             Ok(process) => Some(process),
@@ -56,6 +59,14 @@ impl MonoReader {
 
         self.mono_root_domain
     }
+
+    #[cfg(target_os = "linux")]
+    pub fn read_mono_root_domain(&mut self) -> usize {
+        self.mono_root_domain = 0 as usize;
+
+        self.mono_root_domain
+    }
+
 
     pub fn create_type_definitions(&mut self) -> Vec<usize> {
         // let type_definitions = Vec::new();
