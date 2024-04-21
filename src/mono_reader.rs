@@ -3,13 +3,9 @@ use proc_mem::{ProcMemError, Process};
 
 use process_memory::{DataMember, Memory, ProcessHandle, TryIntoProcessHandle};
 
-#[cfg(target_os = "linux")]
-use sysinfo::Pid;
-
 use crate::constants;
 use crate::pe_reader::PEReader;
 
-#[cfg(target_os = "windows")]
 pub struct MonoReader {
     pid: u32,
     handle: ProcessHandle,
@@ -17,21 +13,11 @@ pub struct MonoReader {
     assembly_image_address: usize,
 }
 
-#[cfg(target_os = "linux")]
-pub struct MonoReader {
-    pid: u32,
-    handle: Pid,
-    mono_root_domain: usize,
-    assembly_image_address: usize,
-}
-
 impl MonoReader {
     pub fn new(pid: u32) -> Self {
-        #[cfg(target_os = "windows")]
-        let handle = pid.try_into_process_handle().unwrap();
-
-        #[cfg(target_os = "linux")]
-        let handle = pid as Pid;
+        let handle = (pid as process_memory::Pid)
+            .try_into_process_handle()
+            .unwrap();
 
         MonoReader {
             pid,

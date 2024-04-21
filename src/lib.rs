@@ -1,4 +1,4 @@
-use sysinfo::{Pid as SysPid, System};
+use sysinfo::{Pid, System};
 
 pub mod constants;
 pub mod field_definition;
@@ -20,7 +20,7 @@ use serde_json::json;
 
 use napi_derive::napi;
 
-pub fn find_pid_by_name(name: &str) -> Option<SysPid> {
+pub fn find_pid_by_name(name: &str) -> Option<Pid> {
     let mut sys = System::new_all();
     sys.refresh_all();
 
