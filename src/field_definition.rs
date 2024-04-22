@@ -1,5 +1,4 @@
-use crate::constants;
-use crate::mono_reader::MonoReader;
+use crate::{constants, MonoReader};
 use crate::type_code::TypeCode;
 use crate::type_info::TypeInfo;
 

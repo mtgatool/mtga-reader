@@ -1,6 +1,8 @@
 #[cfg(target_os = "windows")]
 use proc_mem::{ProcMemError, Process};
 
+use sysinfo::{Pid, System};
+
 use process_memory::{DataMember, Memory, ProcessHandle, TryIntoProcessHandle};
 
 use crate::constants;
@@ -27,6 +29,17 @@ impl MonoReader {
         }
     }
 
+    pub fn find_pid_by_name(name: &str) -> Option<Pid> {
+        let mut sys = System::new_all();
+        sys.refresh_all();
+
+        sys.processes()
+            .iter()
+            .find(|(_, process)| process.name().contains(name))
+            .map(|(pid, _)| *pid)
+    }
+
+
     #[cfg(target_os = "windows")]
     pub fn read_mono_root_domain(&mut self) -> usize {
         let mtga_process = match Process::with_pid(*&self.pid) {
@@ -38,7 +51,7 @@ impl MonoReader {
         }
         .unwrap();
 
-        let module = match mtga_process.module("mono-2.0-bdwgc.dll") {
+        let module = match mtga_process.module(constants::MONO_LIBRARY) {
             Ok(module) => Some(module),
             Err(ProcMemError::ModuleNotFound) => None,
             Err(e) => {

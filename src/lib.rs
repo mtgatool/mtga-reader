@@ -1,5 +1,3 @@
-use sysinfo::{Pid, System};
-
 pub mod constants;
 pub mod field_definition;
 pub mod managed;
@@ -20,16 +18,6 @@ use serde_json::json;
 
 use napi_derive::napi;
 
-pub fn find_pid_by_name(name: &str) -> Option<Pid> {
-    let mut sys = System::new_all();
-    sys.refresh_all();
-
-    sys.processes()
-        .iter()
-        .find(|(_, process)| process.name().contains(name))
-        .map(|(pid, _)| *pid)
-}
-
 pub fn get_def_by_name<'a>(
     defs: &'a Vec<usize>,
     name: String,
@@ -45,7 +33,7 @@ pub fn get_def_by_name<'a>(
 pub fn read_data(process_name: String, fields: Vec<String>) -> serde_json::Value {
     println!("Reading started...");
 
-    let pid = find_pid_by_name(&process_name);
+    let pid = MonoReader::find_pid_by_name(&process_name);
 
     if pid.is_none() {
         return json!({ "error": "Process not found" });
@@ -128,6 +116,24 @@ pub fn read_data(process_name: String, fields: Vec<String>) -> serde_json::Value
             serde_json::from_str(&format!("{{ \"error\": \"{}\" }}", e)).unwrap()
         }
     };
+}
+
+#[test]
+fn test_find_no_process() {
+    let process_name = "_____test";
+
+    let results = MonoReader::find_pid_by_name(&process_name);
+
+    assert_eq!(results.is_none(), true);
+}
+
+#[test]
+fn test_find_mtga() {
+    let process_name = "MTGA";
+
+    let results = MonoReader::find_pid_by_name(&process_name);
+
+    assert_eq!(results.is_some(), true);
 }
 
 /*

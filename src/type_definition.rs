@@ -1,10 +1,7 @@
-use crate::constants;
 use crate::field_definition::FieldDefinition;
 use crate::managed::Managed;
 use crate::mono_class_kind::{match_class_kind, MonoClassKind};
-use crate::mono_reader::MonoReader;
-use crate::type_code::TypeCode;
-use crate::type_info::TypeInfo;
+use crate::{constants, MonoReader, TypeCode, TypeInfo};
 
 use core::fmt;
 

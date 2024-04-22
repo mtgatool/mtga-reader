@@ -1,9 +1,8 @@
-use crate::constants;
 use crate::field_definition::FieldDefinition;
-use crate::mono_reader::MonoReader;
 use crate::type_code::TypeCode;
 use crate::type_definition::TypeDefinition;
 use crate::type_info::TypeInfo;
+use crate::{constants, MonoReader};
 use std::cmp;
 
 pub struct Managed<'a> {
@@ -138,10 +137,7 @@ impl<'a> Managed<'a> {
         let element_definition =
             TypeDefinition::new(self.reader.read_ptr(array_definition_ptr), self.reader);
 
-        let count =
-        self
-            .reader
-            .read_u32(ptr + (constants::SIZE_OF_PTR * 3));
+        let count = self.reader.read_u32(ptr + (constants::SIZE_OF_PTR * 3));
 
         let start = ptr + constants::SIZE_OF_PTR * 4;
 
