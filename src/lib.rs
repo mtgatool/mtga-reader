@@ -133,6 +133,12 @@ fn test_find_mtga() {
 
     let results = MonoReader::find_pid_by_name(&process_name);
 
+    for pid in results.iter() {
+        let mut mono_reader = MonoReader::new(pid.as_u32());
+
+        mono_reader.read_mono_root_domain();
+    }
+
     assert_eq!(results.is_some(), true);
 }
 

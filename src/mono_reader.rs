@@ -39,7 +39,6 @@ impl MonoReader {
             .map(|(pid, _)| *pid)
     }
 
-
     #[cfg(target_os = "windows")]
     pub fn read_mono_root_domain(&mut self) -> usize {
         let mtga_process = match Process::with_pid(*&self.pid) {
@@ -63,7 +62,7 @@ impl MonoReader {
 
         // println!("mono-2.0-bdwgc.dll Base addr: {:?}", module.base_address());
 
-        let pe = PEReader::new(module.data().to_vec());
+        let pe = PEReader::new(&self, module.base_address() as usize);
         let mono_root_offset = pe.get_function_offset("mono_get_root_domain").unwrap();
 
         // println!(
@@ -78,9 +77,41 @@ impl MonoReader {
 
     #[cfg(target_os = "linux")]
     pub fn read_mono_root_domain(&mut self) -> usize {
-        self.mono_root_domain = 0 as usize;
+        // walk trough the memory of the process to find the mono root domain
+        // we use the PE header magic number (MZ) to find the mono library
 
-        self.mono_root_domain
+        let mut addr = 0 as usize;
+        let mut found = 0;
+        let mut managed = DataMember::<u16>::new(self.handle);
+
+        println!("Searching for mono library...");
+
+        let mut mono_root_domain = 0;
+
+        while found < 5 {
+            let val = unsafe {
+                managed.set_offset(vec![addr]);
+                match managed.read() {
+                    Ok(val) => val,
+                    Err(_e) => 0,
+                }
+            };
+
+            // MZ
+            if val == 0x5a4d {
+                let pe = PEReader::new(&self, addr);
+                let mono_root_offset = pe.get_function_offset("mono_get_root_domain").unwrap();
+                println!("mono_get_root_domain offset: {:?}", mono_root_offset);
+
+                mono_root_domain = addr + mono_root_offset as usize;
+
+                found += 1;
+            }
+            addr += 4096;
+        }
+
+        println!("Found mono library at: {:?}", mono_root_domain);
+        mono_root_domain
     }
 
     #[cfg(target_os = "macos")]

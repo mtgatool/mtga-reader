@@ -1,8 +1,10 @@
 use core::fmt::Error;
-use std::convert::TryInto;
 
-pub struct PEReader {
-    raw_data: Vec<u8>,
+use crate::mono_reader::MonoReader;
+
+pub struct PEReader<'a> {
+    reader: &'a MonoReader,
+    address: usize,
 }
 
 const SIGNATURE: u32 = 0x3c;
@@ -13,26 +15,22 @@ const FUNCTION_ADDRESS_ARRAY_INDEX: u32 = 0x1c;
 const FUNCTION_NAME_ARRAY_INDEX: u32 = 0x20;
 const FUNCTION_ENTRY_SIZE: u32 = 4;
 
-impl PEReader {
-    pub fn new(data: Vec<u8>) -> Self {
-        PEReader { raw_data: data }
+impl<'a> PEReader<'a> {
+    pub fn new(reader: &'a MonoReader, address: usize) -> Self {
+        PEReader { reader, address }
     }
 
     fn parse_u32(&self, offset: usize) -> u32 {
-        match self.raw_data.get(offset..offset + 4) {
-            Some(slice) => u32::from_le_bytes(slice.try_into().unwrap()),
-            None => 0,
+        let mut bytes: [u8; 4] = [0, 0, 0, 0];
+        for i in 0..4 {
+            let val = self.reader.read_u8(self.address + offset + i);
+            bytes[i] = val;
         }
+        u32::from_le_bytes(bytes)
     }
 
     fn parse_ascii_string(&self, offset: usize) -> String {
-        let mut string = String::new();
-        let mut index = offset;
-        while self.raw_data[index] != 0 {
-            string.push(self.raw_data[index] as char);
-            index += 1;
-        }
-        string
+        self.reader.read_ascii_string(self.address + offset)
     }
 
     pub fn get_function_offset(&self, name: &str) -> Result<u32, Error> {
