@@ -20,55 +20,65 @@ impl<'a> PEReader<'a> {
         PEReader { reader, address }
     }
 
-    fn parse_u32(&self, offset: usize) -> u32 {
-        let mut bytes: [u8; 4] = [0, 0, 0, 0];
-        for i in 0..4 {
-            let val = self.reader.read_u8(self.address + offset + i);
-            bytes[i] = val;
-        }
-        u32::from_le_bytes(bytes)
-    }
-
-    fn parse_ascii_string(&self, offset: usize) -> String {
-        self.reader.read_ascii_string(self.address + offset)
-    }
-
     pub fn get_function_offset(&self, name: &str) -> Result<u32, Error> {
         let signature_offset = SIGNATURE as usize;
-        let signature = self.parse_u32(signature_offset);
+        let signature = self.reader.read_u32(self.address + signature_offset);
+
+        if signature == 0x0 {
+            println!("Invalid PE signature");
+            return Err(Error::default());
+        }
 
         let export_directory_offset =
             (signature + EXPORT_DIRECTORY_INDEX_PE32_PLUS as u32) as usize;
 
-        let export_directory = self.parse_u32(export_directory_offset);
+        let export_directory = self.reader.read_u32(self.address + export_directory_offset);
 
         let number_of_functions_offset = export_directory + NUMBER_OF_FUNCTIONS as u32;
-        let number_of_functions = self.parse_u32(number_of_functions_offset as usize);
+        let number_of_functions = self
+            .reader
+            .read_u32(self.address + number_of_functions_offset as usize);
 
         let function_address_array_index_offset =
             export_directory + (FUNCTION_ADDRESS_ARRAY_INDEX as u32);
 
-        let function_address_array = self.parse_u32(function_address_array_index_offset as usize);
+        let function_address_array = self
+            .reader
+            .read_u32(self.address + function_address_array_index_offset as usize);
 
         let function_name_array_index_offset =
             export_directory + (FUNCTION_NAME_ARRAY_INDEX as u32);
 
-        let function_name_array = self.parse_u32(function_name_array_index_offset as usize);
+        let function_name_array = self
+            .reader
+            .read_u32(self.address + function_name_array_index_offset as usize);
 
         let mut root_domain_function_address = 0;
         let mut function_index: u32 = 0;
+
         while function_index < number_of_functions * FUNCTION_ENTRY_SIZE as u32 {
             function_index += FUNCTION_ENTRY_SIZE as u32;
 
-            let function_name_index =
-                self.parse_u32((function_name_array + function_index) as usize);
+            let function_name_index = self
+                .reader
+                .read_u32(self.address + (function_name_array + function_index) as usize);
 
-            let function_name = self.parse_ascii_string(function_name_index as usize);
+            let function_name = self
+                .reader
+                .maybe_read_ascii_string(self.address + function_name_index as usize);
 
-            if function_name == name {
-                root_domain_function_address =
-                    self.parse_u32((function_address_array + function_index) as usize);
-                break;
+            match function_name {
+                Some(str) => {
+                    if name == str {
+                        root_domain_function_address = self.reader.read_u32(
+                            self.address + (function_address_array + function_index) as usize,
+                        );
+                        break;
+                    }
+                }
+                None => {
+                    //
+                }
             }
         }
 
