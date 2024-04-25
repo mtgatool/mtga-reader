@@ -7,6 +7,10 @@
   "cpu": [
     "x64"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mtgatool/mtga-reader"
+  },
   "main": "mtga-reader.linux-x64-gnu.node",
   "files": [
     "mtga-reader.linux-x64-gnu.node"
