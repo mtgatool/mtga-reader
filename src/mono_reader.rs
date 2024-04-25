@@ -114,7 +114,8 @@ impl MonoReader {
                         found = true
                     }
                     _ => {
-                        eprintln!("Error: mono_get_root_domain not found");
+                        // This is not the library we are looking for
+                        // eprintln!("Error: mono_get_root_domain not found");
                     }
                 }
             }
@@ -228,7 +229,7 @@ impl MonoReader {
         let val = unsafe {
             match member.read() {
                 Ok(val) => Some(val),
-                Err(_e) => None
+                Err(_e) => None,
             }
         };
 

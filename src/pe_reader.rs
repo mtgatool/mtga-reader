@@ -81,6 +81,10 @@ impl<'a> PEReader<'a> {
             }
         }
 
+        if root_domain_function_address == 0 {
+            return Err(Error::default());
+        }
+
         Ok(root_domain_function_address)
     }
 }
