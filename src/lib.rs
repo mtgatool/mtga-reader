@@ -118,6 +118,16 @@ pub fn read_data(process_name: String, fields: Vec<String>) -> serde_json::Value
     };
 }
 
+#[napi]
+pub fn find_pid_by_name(process_name: String) -> bool {
+    let results = MonoReader::find_pid_by_name(&process_name);
+
+    return match results {
+        Some(_pid) => true,
+        None => false,
+    };
+}
+
 #[test]
 fn test_find_no_process() {
     let process_name = "_____test";
