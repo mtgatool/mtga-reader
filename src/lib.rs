@@ -133,13 +133,23 @@ fn test_find_mtga() {
 
     let results = MonoReader::find_pid_by_name(&process_name);
 
-    for pid in results.iter() {
-        let mut mono_reader = MonoReader::new(pid.as_u32());
-
-        mono_reader.read_mono_root_domain();
-    }
-
     assert_eq!(results.is_some(), true);
+}
+
+#[test]
+fn test_read_data() {
+    let path = vec![
+        "WrapperController".to_string(),
+        "<Instance>k__BackingField".to_string(),
+        "<InventoryManager>k__BackingField".to_string(),
+        "_inventoryServiceWrapper".to_string(),
+        "<Cards>k__BackingField".to_string(),
+        "_entries".to_string(),
+    ];
+
+    let data = read_data("MTGA".to_string(), path);
+    println!("{}", data.to_string());
+    assert_eq!(data.is_object(), true);
 }
 
 /*
