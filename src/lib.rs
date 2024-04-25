@@ -144,7 +144,6 @@ fn test_read_data() {
         "<InventoryManager>k__BackingField".to_string(),
         "_inventoryServiceWrapper".to_string(),
         "<Cards>k__BackingField".to_string(),
-        "_entries".to_string(),
     ];
 
     let data = read_data("MTGA".to_string(), path);

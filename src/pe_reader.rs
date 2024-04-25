@@ -21,8 +21,7 @@ impl<'a> PEReader<'a> {
     }
 
     pub fn get_function_offset(&self, name: &str) -> Result<u32, Error> {
-        let signature_offset = SIGNATURE as usize;
-        let signature = self.reader.read_u32(self.address + signature_offset);
+        let signature = self.reader.read_u32(self.address + SIGNATURE as usize);
 
         if signature == 0x0 {
             println!("Invalid PE signature");

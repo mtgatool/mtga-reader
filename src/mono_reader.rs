@@ -60,18 +60,24 @@ impl MonoReader {
         }
         .unwrap();
 
-        // println!("mono-2.0-bdwgc.dll Base addr: {:?}", module.base_address());
+        // println!("mono-2.0-bdwgc.dll Base addr: {:x?}", module.base_address());
 
         let pe = PEReader::new(&self, module.base_address() as usize);
-        let mono_root_offset = pe.get_function_offset("mono_get_root_domain").unwrap();
 
-        // println!(
-        //     "mono_root_domain addr: {:?}",
-        //     module.base_address() + mono_root_offset as usize
-        // );
+        let mono_root_offset = pe.get_function_offset("mono_get_root_domain");
 
-        self.mono_root_domain = module.base_address() + mono_root_offset as usize;
+        println!("mono_get_root_domain offset: {:?}", mono_root_offset);
 
+        match mono_root_offset {
+            Ok(offset) => {
+                self.mono_root_domain = module.base_address() as usize + offset as usize;
+            }
+            _ => {
+                eprintln!("Error: mono_get_root_domain not found");
+            }
+        }
+
+        println!("mono_root_domain addr: {:x?}", self.mono_root_domain);
         self.mono_root_domain
     }
 
@@ -86,8 +92,6 @@ impl MonoReader {
 
         println!("Searching for mono library...");
 
-        let mut mono_root_domain = 0;
-
         while !found {
             let val = unsafe {
                 managed.set_offset(vec![addr]);
@@ -101,20 +105,24 @@ impl MonoReader {
             if val == 0x5a4d {
                 let pe = PEReader::new(&self, addr);
 
-                let mono_root_offset = pe.get_function_offset("mono_get_root_domain").unwrap();
+                let mono_root_offset = pe.get_function_offset("mono_get_root_domain");
 
-                if mono_root_offset != 0 {
-                    println!("mono_get_root_domain offset: {:?}", mono_root_offset);
-                    mono_root_domain = addr + mono_root_offset as usize;
-                    found = true
+                match mono_root_offset {
+                    Ok(offset) => {
+                        println!("mono_get_root_domain offset: {:?}", offset);
+                        self.mono_root_domain = addr + offset as usize;
+                        found = true
+                    }
+                    _ => {
+                        eprintln!("Error: mono_get_root_domain not found");
+                    }
                 }
             }
             addr += 4096;
         }
 
-        println!("Found mono library at: {:?}", mono_root_domain);
-        self.mono_root_domain = mono_root_domain;
-        mono_root_domain
+        println!("mono_root_domain addr: {:x?}", self.mono_root_domain);
+        self.mono_root_domain
     }
 
     #[cfg(target_os = "macos")]
@@ -176,7 +184,7 @@ impl MonoReader {
 
         let domain = self.read_ptr(self.mono_root_domain + offset as usize);
 
-        println!("Domain address: {:?}", domain);
+        println!("Domain address: {:x?}", domain);
 
         let assembly_array_address =
             self.read_ptr(domain + constants::REFERENCED_ASSEMBLIES as usize);
