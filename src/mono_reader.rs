@@ -197,14 +197,21 @@ impl MonoReader {
             let assembly_name_address =
                 self.read_ptr(assembly + (constants::SIZE_OF_PTR * 2 as usize));
 
-            let assembly_name = self.read_ascii_string(assembly_name_address);
+            let maybe_name = self.maybe_read_ascii_string(assembly_name_address);
 
-            if assembly_name == "Assembly-CSharp" {
-                println!("Assembly name: {:?}", assembly_name);
-                println!("  - {:?}", assembly_name_address);
-                self.assembly_image_address =
-                    self.read_ptr(assembly + constants::ASSEMBLY_IMAGE as usize);
-                return self.assembly_image_address;
+            match maybe_name {
+                Some(assembly_name) => {
+                    if assembly_name == "Assembly-CSharp" {
+                        println!("Assembly name: {:?}", assembly_name);
+                        println!("  - {:?}", assembly_name_address);
+                        self.assembly_image_address =
+                            self.read_ptr(assembly + constants::ASSEMBLY_IMAGE as usize);
+                        return self.assembly_image_address;
+                    }
+                }
+                None => {
+                    eprintln!("Error reading assembly name");
+                }
             }
 
             assembly_address = self.read_ptr(assembly_address + constants::SIZE_OF_PTR as usize);
@@ -221,7 +228,7 @@ impl MonoReader {
         let val = unsafe {
             match member.read() {
                 Ok(val) => Some(val),
-                Err(_e) => None,
+                Err(_e) => None
             }
         };
 
@@ -395,6 +402,7 @@ impl MonoReader {
         return val;
     }
 
+    // This methos will throw and error if the address is not readable
     pub fn maybe_read_ascii_string(&self, addr: usize) -> Option<String> {
         let mut string = String::new();
         let mut index = 0;
@@ -414,16 +422,23 @@ impl MonoReader {
         Some(string)
     }
 
+    // This method is optimistic, and will return a cutted string if the address
+    // is not readable
     pub fn read_ascii_string(&self, addr: usize) -> String {
         let mut string = String::new();
-        let mut index = addr;
+        let mut index = 0;
         loop {
-            let val = self.read_u8(index);
-            if val == 0 || index > 1024 {
-                break;
+            let val = self.maybe_read_u8(addr + index);
+            match val {
+                Some(val) => {
+                    if val == 0 || index > 1024 {
+                        break;
+                    }
+                    string.push(val as char);
+                    index += 1;
+                }
+                None => break,
             }
-            string.push(val as char);
-            index += 1;
         }
         string
     }
