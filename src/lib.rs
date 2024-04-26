@@ -147,13 +147,34 @@ fn test_find_mtga() {
 }
 
 #[test]
-fn test_read_data() {
+fn test_read_cards() {
     let path = vec![
         "WrapperController".to_string(),
         "<Instance>k__BackingField".to_string(),
         "<InventoryManager>k__BackingField".to_string(),
         "_inventoryServiceWrapper".to_string(),
         "<Cards>k__BackingField".to_string(),
+        "_entries".to_string(),
+    ];
+
+    let data = read_data("MTGA".to_string(), path);
+    assert_eq!(data.is_array(), true);
+
+    let any_entry = data.get(0).unwrap();
+    assert_eq!(any_entry.is_object(), true);
+    println!("{:?}", any_entry);
+    assert_eq!(any_entry.get("key").unwrap().is_number(), true);
+    assert_eq!(any_entry.get("value").unwrap().is_number(), true);
+}
+
+#[test]
+fn test_read_formats() {
+    let path = vec![
+        "PAPA".to_string(),
+        "_instance".to_string(),
+        "_formatManager".to_string(),
+        "_formats".to_string(),
+        "_items".to_string(),
     ];
 
     let data = read_data("MTGA".to_string(), path);
