@@ -4,7 +4,7 @@ name = "mtga-reader"
 version = "0.0.0"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "lib"]
 name = "mtga_reader"
 path = "src/lib.rs"
 
