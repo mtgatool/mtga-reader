@@ -8,6 +8,10 @@ crate-type = ["cdylib", "lib"]
 name = "mtga_reader"
 path = "src/lib.rs"
 
+[[bin]]
+name = "debugger"
+path = "src/debug.rs"
+
 [dependencies]
 # Default enable napi4 feature, see https://nodejs.org/api/n-api.html#node-api-version-matrix
 napi = { version = "2.12.2", default-features = false, features = ["napi4", "serde-json"] }
