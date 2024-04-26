@@ -1,4 +1,6 @@
-use mtga_reader::read_data;
+// Should enable [lib] crate-type = ["lib"] in Cargo.toml to use this .rs
+// im pretty sure there is a way to make this work trough parameters but i dont know how
+use mono_reader::MonoReader;
 
 pub fn main() {
     let path = vec![

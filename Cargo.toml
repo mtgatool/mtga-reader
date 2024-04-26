@@ -4,13 +4,9 @@ name = "mtga-reader"
 version = "0.0.0"
 
 [lib]
-crate-type = ["cdylib", "lib"]
+crate-type = ["cdylib"]
 name = "mtga_reader"
 path = "src/lib.rs"
-
-[[bin]]
-name = "debugger"
-path = "src/debug.rs"
 
 [dependencies]
 # Default enable napi4 feature, see https://nodejs.org/api/n-api.html#node-api-version-matrix
