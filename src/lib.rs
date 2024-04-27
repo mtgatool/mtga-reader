@@ -18,6 +18,22 @@ use serde_json::json;
 
 use napi_derive::napi;
 
+// Utility fn to get the reader and initialize it
+pub fn get_reader(process_name: String) -> Option<MonoReader> {
+    let pid = MonoReader::find_pid_by_name(&process_name);
+
+    if pid.is_none() {
+        return None;
+    }
+
+    let pid = pid.iter().next().unwrap();
+
+    let mut mono_reader = MonoReader::new(pid.as_u32());
+    mono_reader.read_mono_root_domain();
+    mono_reader.read_assembly_image();
+    return Some(mono_reader);
+}
+
 pub fn get_def_by_name<'a>(
     defs: &'a Vec<usize>,
     name: String,
@@ -33,89 +49,142 @@ pub fn get_def_by_name<'a>(
 pub fn read_data(process_name: String, fields: Vec<String>) -> serde_json::Value {
     println!("Reading started...");
 
-    let pid = MonoReader::find_pid_by_name(&process_name);
+    let reader = get_reader(process_name);
 
-    if pid.is_none() {
-        return json!({ "error": "Process not found" });
-    }
+    match reader {
+        None => return json!({ "error": "Process not found" }),
+        Some(mut mono_reader) => {
+            let defs = mono_reader.create_type_definitions();
 
-    let mut return_string: String = String::new();
+            // get the type defs on the root of the assembly for the first loop
+            let definition = get_def_by_name(&defs, fields[0].clone(), &mono_reader)
+                .unwrap()
+                .clone();
 
-    pid.iter().for_each(|pid| {
-        let mut mono_reader = MonoReader::new(pid.as_u32());
+            // skipt the first item in the find array
+            let find = &fields[1..];
 
-        mono_reader.read_mono_root_domain();
-        mono_reader.read_assembly_image();
-        let defs = mono_reader.create_type_definitions();
+            let mut field = (definition.clone(), TypeInfo::new(definition, &mono_reader));
 
-        // get the type defs on the root of the assembly for the first loop
-        let definition = get_def_by_name(&defs, fields[0].clone(), &mono_reader)
-            .unwrap()
-            .clone();
+            for (index, name) in find.iter().enumerate() {
+                field = match index {
+                    0 => {
+                        let class = TypeDefinition::new(definition, &mono_reader);
+                        class.get_static_value(name)
+                    }
+                    _ => {
+                        let managed = Managed::new(&mono_reader, field.0, None);
+                        let ptr = mono_reader.read_ptr(field.0);
+                        let code = field.1.clone().code();
+                        let class = match code {
+                            TypeCode::GENERICINST => managed.read_generic_instance(field.1.clone()),
+                            _ => managed.read_class(),
+                        };
+                        class.get_value(name, ptr)
+                    }
+                };
+                let code = field.1.clone();
+                println!("Find: {}: {} {}", name, code.code(), field.0);
+            }
 
-        // skipt the first item in the find array
-        let find = &fields[1..];
+            let managed = Managed::new(&mono_reader, field.0, None);
+            let ptr = mono_reader.read_ptr(field.0);
+            let code = field.1.clone().code();
 
-        let mut field = (definition.clone(), TypeInfo::new(definition, &mono_reader));
-
-        for (index, name) in find.iter().enumerate() {
-            field = match index {
-                0 => {
-                    let class = TypeDefinition::new(definition, &mono_reader);
-                    class.get_static_value(name)
+            let strout = match code {
+                TypeCode::CLASS => {
+                    let mut class = managed.read_class();
+                    class.set_fields_base(ptr);
+                    class.to_string()
                 }
+                TypeCode::GENERICINST => {
+                    let mut class = managed.read_generic_instance(field.1.clone());
+                    class.set_fields_base(ptr);
+                    class.to_string()
+                }
+                TypeCode::SZARRAY => managed.read_managed_array(),
                 _ => {
-                    let managed = Managed::new(&mono_reader, field.0, None);
-                    let ptr = mono_reader.read_ptr(field.0);
-                    let code = field.1.clone().code();
-                    let class = match code {
-                        TypeCode::GENERICINST => managed.read_generic_instance(field.1.clone()),
-                        _ => managed.read_class(),
-                    };
-                    class.get_value(name, ptr)
+                    println!("Code: {} strout not implemented", code);
+                    String::from("{}")
                 }
             };
-            let code = field.1.clone();
-            println!("Find: {}: {} {}", name, code.code(), field.0);
+
+            let return_string = strout.clone();
+
+            let clean_str = return_string
+                .chars()
+                .filter(|c| !c.is_control())
+                .collect::<String>();
+            let json = serde_json::from_str(&clean_str);
+            return match json {
+                Ok(j) => j,
+                Err(e) => {
+                    println!("Error: {}", e);
+                    serde_json::from_str(&format!("{{ \"error\": \"{}\" }}", e)).unwrap()
+                }
+            };
         }
+    }
+}
 
-        let managed = Managed::new(&mono_reader, field.0, None);
-        let ptr = mono_reader.read_ptr(field.0);
-        let code = field.1.clone().code();
+#[napi]
+pub fn read_class(process_name: String, address: i64) -> serde_json::Value {
+    let reader = get_reader(process_name);
 
-        let strout = match code {
-            TypeCode::CLASS => {
-                let mut class = managed.read_class();
-                class.set_fields_base(ptr);
-                class.to_string()
-            }
-            TypeCode::GENERICINST => {
-                let mut class = managed.read_generic_instance(field.1.clone());
-                class.set_fields_base(ptr);
-                class.to_string()
-            }
-            TypeCode::SZARRAY => managed.read_managed_array(),
-            _ => {
-                println!("Code: {} strout not implemented", code);
-                String::from("{}")
-            }
-        };
+    match reader {
+        None => return json!({ "error": "Process not found" }),
+        Some(mono_reader) => {
+            let managed = Managed::new(&mono_reader, address as usize, None);
+            let ptr = mono_reader.read_ptr(address as usize);
 
-        return_string = strout.clone();
-    });
+            let mut class = managed.read_class();
+            class.set_fields_base(ptr);
+            let return_string = class.to_string();
 
-    let clean_str = return_string
-        .chars()
-        .filter(|c| !c.is_control())
-        .collect::<String>();
-    let json = serde_json::from_str(&clean_str);
-    return match json {
-        Ok(j) => j,
-        Err(e) => {
-            println!("Error: {}", e);
-            serde_json::from_str(&format!("{{ \"error\": \"{}\" }}", e)).unwrap()
+            let clean_str = return_string
+                .chars()
+                .filter(|c| !c.is_control())
+                .collect::<String>();
+            let json = serde_json::from_str(&clean_str);
+            return match json {
+                Ok(j) => j,
+                Err(e) => {
+                    println!("Error: {}", e);
+                    serde_json::from_str(&format!("{{ \"error\": \"{}\" }}", e)).unwrap()
+                }
+            };
         }
-    };
+    }
+}
+
+#[napi]
+pub fn read_generic_instance(process_name: String, address: i64) -> serde_json::Value {
+    let reader = get_reader(process_name);
+
+    match reader {
+        None => return json!({ "error": "Process not found" }),
+        Some(mono_reader) => {
+            let managed = Managed::new(&mono_reader, address as usize, None);
+            let ptr = mono_reader.read_ptr(address as usize);
+
+            let mut class = managed.read_generic_instance(TypeInfo::new(ptr, &mono_reader));
+            class.set_fields_base(ptr);
+            let return_string = class.to_string();
+
+            let clean_str = return_string
+                .chars()
+                .filter(|c| !c.is_control())
+                .collect::<String>();
+            let json = serde_json::from_str(&clean_str);
+            return match json {
+                Ok(j) => j,
+                Err(e) => {
+                    println!("Error: {}", e);
+                    serde_json::from_str(&format!("{{ \"error\": \"{}\" }}", e)).unwrap()
+                }
+            };
+        }
+    }
 }
 
 #[napi]
