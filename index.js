@@ -310,6 +310,9 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { readData } = nativeBinding
+const { readData, readClass, readGenericInstance, findPidByName } = nativeBinding
 
 module.exports.readData = readData
+module.exports.readClass = readClass
+module.exports.readGenericInstance = readGenericInstance
+module.exports.findPidByName = findPidByName
