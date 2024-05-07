@@ -7,3 +7,4 @@ export function readData(processName: string, fields: Array<string>): any
 export function readClass(processName: string, address: number): any
 export function readGenericInstance(processName: string, address: number): any
 export function findPidByName(processName: string): boolean
+export function isAdmin(): boolean

@@ -310,9 +310,10 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { readData, readClass, readGenericInstance, findPidByName } = nativeBinding
+const { readData, readClass, readGenericInstance, findPidByName, isAdmin } = nativeBinding
 
 module.exports.readData = readData
 module.exports.readClass = readClass
 module.exports.readGenericInstance = readGenericInstance
 module.exports.findPidByName = findPidByName
+module.exports.isAdmin = isAdmin
