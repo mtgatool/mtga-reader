@@ -1,6 +1,12 @@
 #[cfg(target_os = "windows")]
 use proc_mem::{ProcMemError, Process};
 
+#[cfg(target_os = "windows")]
+use is_elevated::is_elevated;
+
+#[cfg(target_os = "linux")]
+use sudo::RunningAs;
+
 use sysinfo::{Pid, System};
 
 use process_memory::{DataMember, Memory, ProcessHandle, TryIntoProcessHandle};
@@ -37,6 +43,17 @@ impl MonoReader {
             .iter()
             .find(|(_, process)| process.name().contains(name))
             .map(|(pid, _)| *pid)
+    }
+
+    pub fn is_admin() -> bool {
+        #[cfg(target_os = "windows")]
+        {
+            return is_elevated();
+        }
+        #[cfg(target_os = "linux")]
+        {
+            return sudo::check() = RunningAs::Root;
+        }
     }
 
     #[cfg(target_os = "windows")]

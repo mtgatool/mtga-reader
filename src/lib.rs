@@ -47,6 +47,10 @@ pub fn get_def_by_name<'a>(
 
 #[napi]
 pub fn read_data(process_name: String, fields: Vec<String>) -> serde_json::Value {
+    if !MonoReader::is_admin() {
+        return json!({ "error": "Not elevated" });
+    }
+
     println!("Reading started...");
 
     let reader = get_reader(process_name);
@@ -129,6 +133,10 @@ pub fn read_data(process_name: String, fields: Vec<String>) -> serde_json::Value
 
 #[napi]
 pub fn read_class(process_name: String, address: i64) -> serde_json::Value {
+    if !MonoReader::is_admin() {
+        return json!({ "error": "Not elevated" });
+    }
+
     let reader = get_reader(process_name);
 
     match reader {
@@ -159,6 +167,10 @@ pub fn read_class(process_name: String, address: i64) -> serde_json::Value {
 
 #[napi]
 pub fn read_generic_instance(process_name: String, address: i64) -> serde_json::Value {
+    if !MonoReader::is_admin() {
+        return json!({ "error": "Not elevated" });
+    }
+
     let reader = get_reader(process_name);
 
     match reader {
@@ -195,6 +207,12 @@ pub fn find_pid_by_name(process_name: String) -> bool {
         Some(_pid) => true,
         None => false,
     };
+}
+
+#[napi]
+pub fn is_admin() -> bool {
+    let results = MonoReader::is_admin();
+    return results;
 }
 
 #[test]
