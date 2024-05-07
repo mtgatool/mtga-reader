@@ -52,7 +52,7 @@ impl MonoReader {
         }
         #[cfg(target_os = "linux")]
         {
-            return sudo::check() = RunningAs::Root;
+            return sudo::check() == RunningAs::Root;
         }
     }
 
