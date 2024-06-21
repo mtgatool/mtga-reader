@@ -40,5 +40,9 @@
     "test": "ava",
     "universal": "napi universal",
     "version": "napi version"
+  },
+  "optionalDependencies": {
+    "mtga-reader-win32-x64-msvc": "0.1.4",
+    "mtga-reader-linux-x64-gnu": "0.1.4"
   }
 }
