@@ -17,6 +17,10 @@ process-memory = "0.5.0"
 read-process-memory = "0.1.6"
 serde_json = "1.0.116"
 sysinfo = "0.30.11"
+axum = "0.7"
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.5", features = ["cors"] }
+serde = { version = "1.0", features = ["derive"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 sudo = "0.6.0"
@@ -24,6 +28,8 @@ sudo = "0.6.0"
 [target.'cfg(target_os = "windows")'.dependencies]
 proc_mem = "0.1.6"
 is_elevated = "0.1.2"
+pelite = "0.10"
+winapi = { version = "0.3", features = ["psapi", "processthreadsapi", "handleapi", "winnt"] }
 
 [build-dependencies]
 napi-build = "2.0.1"

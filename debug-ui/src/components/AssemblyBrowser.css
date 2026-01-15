@@ -1,0 +1,102 @@
+.assembly-browser {
+  border-right: 1px solid #3e3e42;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  background: #252526;
+  overflow: hidden;
+}
+
+.panel-header {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #3e3e42;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.panel-header h2 {
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: #cccccc;
+  letter-spacing: 0.5px;
+}
+
+.count-badge {
+  background: #3e3e42;
+  color: #cccccc;
+  padding: 0.125rem 0.5rem;
+  border-radius: 10px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.search-box {
+  padding: 0.5rem;
+  border-bottom: 1px solid #3e3e42;
+}
+
+.search-input {
+  width: 100%;
+  padding: 0.5rem;
+  background: #3c3c3c;
+  border: 1px solid #3e3e42;
+  border-radius: 4px;
+  color: #cccccc;
+  font-size: 0.875rem;
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: #0e639c;
+}
+
+.search-input::placeholder {
+  color: #858585;
+}
+
+.assembly-list {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.assembly-item {
+  padding: 0.5rem 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  transition: background 0.15s;
+  border-left: 3px solid transparent;
+}
+
+.assembly-item:hover {
+  background: #2a2d2e;
+}
+
+.assembly-item.selected {
+  background: #37373d;
+  border-left-color: #0e639c;
+}
+
+.assembly-icon {
+  font-size: 1rem;
+}
+
+.assembly-name {
+  font-size: 0.875rem;
+  color: #cccccc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.empty-message {
+  padding: 2rem 1rem;
+  text-align: center;
+  color: #858585;
+  font-size: 0.875rem;
+}

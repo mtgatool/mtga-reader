@@ -7,6 +7,7 @@ pub mod pe_reader;
 pub mod type_code;
 pub mod type_definition;
 pub mod type_info;
+pub mod unity_version;
 
 use managed::Managed;
 use mono_reader::MonoReader;
@@ -54,12 +55,39 @@ pub fn read_data(process_name: String, fields: Vec<String>) -> serde_json::Value
     match reader {
         None => return json!({ "error": "Process not found" }),
         Some(mut mono_reader) => {
+            // First try Assembly-CSharp
             let defs = mono_reader.create_type_definitions();
 
             // get the type defs on the root of the assembly for the first loop
-            let definition = get_def_by_name(&defs, fields[0].clone(), &mono_reader)
-                .unwrap()
-                .clone();
+            let definition = match get_def_by_name(&defs, fields[0].clone(), &mono_reader) {
+                Some(def) => def.clone(),
+                None => {
+                    // Try searching in other assemblies
+                    let assemblies = mono_reader.get_all_assembly_names();
+                    let mut found_def: Option<usize> = None;
+
+                    for asm_name in assemblies {
+                        if asm_name == "Assembly-CSharp" {
+                            continue; // Already searched
+                        }
+                        let asm_image = mono_reader.read_assembly_image_by_name(&asm_name);
+                        if asm_image == 0 {
+                            continue;
+                        }
+                        let asm_defs = mono_reader.create_type_definitions_for_image(asm_image);
+                        if let Some(def) = get_def_by_name(&asm_defs, fields[0].clone(), &mono_reader) {
+                            println!("Found '{}' in assembly '{}'", fields[0], asm_name);
+                            found_def = Some(def.clone());
+                            break;
+                        }
+                    }
+
+                    match found_def {
+                        Some(def) => def,
+                        None => return json!({ "error": format!("Class '{}' not found in any assembly", fields[0]) }),
+                    }
+                }
+            };
 
             // skipt the first item in the find array
             let find = &fields[1..];

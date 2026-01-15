@@ -1,0 +1,10 @@
+# Dependencies
+node_modules/
+
+# Build artifacts
+target/
+*.node
+
+# npm
+npm-debug.log*
+package-lock.json

@@ -173,9 +173,13 @@ impl<'a> TypeDefinition<'a> {
                 if field_def.name == field_name {
                     let v_table_memory_size = constants::SIZE_OF_PTR * self.v_table_size as usize;
 
-                    let value_ptr = self.reader.read_ptr(
+                    // Get base address of static fields area
+                    let static_fields_base = self.reader.read_ptr(
                         self.v_table + (constants::V_TABLE as usize) + v_table_memory_size,
                     );
+
+                    // Add the field's offset within the static fields area
+                    let value_ptr = static_fields_base + field_def.offset as usize;
 
                     return (value_ptr, field_def.type_info);
                 }

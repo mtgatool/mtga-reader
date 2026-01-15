@@ -1,0 +1,121 @@
+﻿cargo :    Compiling mtga-reader v0.0.0 (C:\Users\manue\OneDrive\Documentos\GitHub\mtga-reader)
+At C:\Users\manue\AppData\Local\Temp\ps-script-c41f1239-d3c9-44e7-aaf9-b9660e7bcd25.ps1:7 char:1
++ cargo run --bin debug 2>&1 | Out-File -FilePath debug_output.txt -Enc ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling mt...ub\mtga-reader):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+error: linking with `link.exe` failed: exit code: 1104
+  |
+  = note: "C:\\Program Files (x86)\\Microsoft Visual 
+Studio\\2019\\Community\\VC\\Tools\\MSVC\\14.29.30133\\bin\\HostX64\\x64\\link.exe" "/NOLOGO" 
+"C:\\Users\\manue\\AppData\\Local\\Temp\\rustcyVgVu9\\symbols.o" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\debug.10lzslvz7vmqn083.rcgu.o" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\debug.18d3viwars478xvb.rcgu.o" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\debug.1g8f83jikq3jobl5.rcgu.o" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\debug.1oblcwg0nsrakf88.rcgu.o" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\debug.1zipjiw7ipt81fn2.rcgu.o" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\debug.23slqrq5azu1pnz3.rcgu.o" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\debug.2gboea7uef8vwtp5.rcgu.o" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\debug.2odvv31cx88slwix.rcgu.o" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\debug.33nx04l4vuuddggj.rcgu.o" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\debug.3bji55mp0ow5aan7.rcgu.o" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\debug.3c2x2n4q0dd2bteb.rcgu.o" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\debug.3ete7lmmayn7jgd2.rcgu.o" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\debug.3i5cdgv1zjgq1up.rcgu.o" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\debug.3qrtz8a28m49ctxe.rcgu.o" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\debug.3r0j4wir7ia5zspw.rcgu.o" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\debug.4054q035cax4z27d.rcgu.o" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\debug.418zk15xawjrriyy.rcgu.o" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\debug.41y02py7cb43mcnv.rcgu.o" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\debug.45boe1d70cjnj4zs.rcgu.o" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\debug.4j3sraiiragcxuus.rcgu.o" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\debug.4rin7clcbzygxrey.rcgu.o" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\debug.4twext0t74jep9tu.rcgu.o" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\debug.4va0vec05w8ko499.rcgu.o" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\debug.4y595ab3w557dyhg.rcgu.o" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\debug.572f651wzl1fz07c.rcgu.o" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\debug.63kbtki58j72jzy.rcgu.o" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\debug.anxq9595ai3he3u.rcgu.o" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\debug.b38udtkhfktz9i9.rcgu.o" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\debug.cyn6w2oolxifb7q.rcgu.o" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\debug.flzq0sso0xhxjlu.rcgu.o" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\debug.hu4eihq4i5jyffq.rcgu.o" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\debug.jzuv1fs9dbp0y21.rcgu.o" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\debug.ofzfco2gfy4rnq0.rcgu.o" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\debug.29cgt2ht40m58vub.rcgu.o" 
+"/LIBPATH:C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps" 
+"/LIBPATH:C:\\Users\\manue\\.cargo\\registry\\src\\index.crates.io-6f17d22bba15001f\\windows_x86_64_msvc-0.52.5\\lib" "
+/LIBPATH:C:\\Users\\manue\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\x86_64-pc-windows-msvc\\li
+b" "C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\libmtga_reader.rlib" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\libnapi-ca52d6d64ecfb0c2.rlib" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\libnapi_sys-b56d3dc9ee6c1076.rlib" "
+C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\liblibloading-828936825e515abb.rlib" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\libbitflags-152f419b65668e5b.rlib" "
+C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\libserde_json-d68d07b2637cf172.rlib" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\libitoa-df2029ca2e430621.rlib" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\libryu-28b3e2dd44e1db8d.rlib" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\libserde-b1f47ca3a5449377.rlib" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\libpelite-e387677aff0e77a1.rlib" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\libdataview-73992a27932bcec3.rlib" "
+C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\libno_std_compat-23d7431bfa57b8cb.rli
+b" "C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\libprocess_memory-1d6561f33967b59
+6.rlib" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\libsysinfo-5ee7269fa276e569.rlib" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\libonce_cell-6dd53beb49ae9026.rlib" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\libntapi-4dec81114a487623.rlib" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\liblibc-5c377c7203180ccc.rlib" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\libwindows-3b2e91f04ee42d92.rlib" "C
+:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\libwindows_core-9c31ac2899cdd63b.rlib"
+ "C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\libwindows_targets-e096fd9f6671c3c8
+.rlib" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\libcfg_if-0f14f973694288b0.rlib" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\librayon-1e5b5eb9fcbdcf7c.rlib" "C:\
+\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\librayon_core-99788451d81eec66.rlib" "C:
+\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\libcrossbeam_deque-7c6484048820eebf.rli
+b" "C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\libcrossbeam_epoch-100b6bc7d51155
+f7.rlib" "C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\libcrossbeam_utils-03c4e058
+d5ce90f9.rlib" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\libeither-29da97a2934b1f40.rlib" "C:
+\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\libis_elevated-3b43c31d3c7c6e53.rlib" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\libproc_mem-2e2d2d4eaf1a8b1d.rlib" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\libregex-40e200f2509f64a1.rlib" "C:\
+\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\libregex_automata-81f187037aa2a58a.rlib"
+ "C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\libaho_corasick-f5759b7045217593.rl
+ib" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\libmemchr-ce5a9d5db104a296.rlib" "C:
+\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\libregex_syntax-2de00703e00af9c8.rlib" 
+"C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\libwinapi-9d3c0801af9c626d.rlib" "C:
+\\Users\\manue\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\x86_64-pc-windows-msvc\\lib\\libstd-4
+eebbe9783f90781.rlib" "C:\\Users\\manue\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\x86_64-pc-wi
+ndows-msvc\\lib\\libpanic_unwind-f235a851291f88f9.rlib" "C:\\Users\\manue\\.rustup\\toolchains\\stable-x86_64-pc-window
+s-msvc\\lib\\rustlib\\x86_64-pc-windows-msvc\\lib\\librustc_demangle-700f5e4adfccaf0e.rlib" "C:\\Users\\manue\\.rustup\
+\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\x86_64-pc-windows-msvc\\lib\\libstd_detect-46885cba99d4a3a1.r
+lib" "C:\\Users\\manue\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\x86_64-pc-windows-msvc\\lib\\
+libhashbrown-def8df116250e57a.rlib" "C:\\Users\\manue\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib
+\\x86_64-pc-windows-msvc\\lib\\librustc_std_workspace_alloc-6415affc345ef5d0.rlib" "C:\\Users\\manue\\.rustup\\toolchai
+ns\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\x86_64-pc-windows-msvc\\lib\\libunwind-fa84163161b01c54.rlib" "C:\\Use
+rs\\manue\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\x86_64-pc-windows-msvc\\lib\\libcfg_if-473
+91e5899e7b0c2.rlib" "C:\\Users\\manue\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\x86_64-pc-wind
+ows-msvc\\lib\\liblibc-0e478ab8bb65a3f3.rlib" "C:\\Users\\manue\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\li
+b\\rustlib\\x86_64-pc-windows-msvc\\lib\\liballoc-6c773432c0871bd0.rlib" "C:\\Users\\manue\\.rustup\\toolchains\\stable
+-x86_64-pc-windows-msvc\\lib\\rustlib\\x86_64-pc-windows-msvc\\lib\\librustc_std_workspace_core-756f2f9b45be14bb.rlib" 
+"C:\\Users\\manue\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\x86_64-pc-windows-msvc\\lib\\libco
+re-ccdf4358954b926b.rlib" "C:\\Users\\manue\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\x86_64-p
+c-windows-msvc\\lib\\libcompiler_builtins-96e76e7a5845557c.rlib" "windows.0.52.0.lib" "ntdll.lib" 
+"legacy_stdio_definitions.lib" "windows.0.52.0.lib" "windows.0.52.0.lib" "advapi32.lib" "cfgmgr32.lib" "credui.lib" 
+"kernel32.lib" "psapi.lib" "secur32.lib" "user32.lib" "kernel32.lib" "advapi32.lib" "bcrypt.lib" "kernel32.lib" 
+"ntdll.lib" "userenv.lib" "ws2_32.lib" "kernel32.lib" "ws2_32.lib" "kernel32.lib" "ntdll.lib" "kernel32.lib" 
+"libcmt.lib" "/NXCOMPAT" "/LIBPATH:C:\\Users\\manue\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\
+x86_64-pc-windows-msvc\\lib" 
+"/OUT:C:\\Users\\manue\\OneDrive\\Documentos\\GitHub\\mtga-reader\\target\\debug\\deps\\debug.exe" "/OPT:REF,NOICF" 
+"/DEBUG" 
+"/NATVIS:C:\\Users\\manue\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\etc\\intrinsic.natvis" 
+"/NATVIS:C:\\Users\\manue\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\etc\\liballoc.natvis" 
+"/NATVIS:C:\\Users\\manue\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\etc\\libcore.natvis" 
+"/NATVIS:C:\\Users\\manue\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\etc\\libstd.natvis"
+  = note: LINK : fatal error LNK1104: no se puede abrir el archivo 
+'C:\Users\manue\OneDrive\Documentos\GitHub\mtga-reader\target\debug\deps\debug.exe'
+          
+
+error: could not compile `mtga-reader` (bin "debug") due to 1 previous error

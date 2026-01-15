@@ -1,0 +1,227 @@
+.instance-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem;
+}
+
+.instance-header-info {
+  background: #2d2d30;
+  border-radius: 4px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.instance-title {
+  margin-bottom: 0.5rem;
+}
+
+.instance-class {
+  color: #4ec9b0;
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.instance-namespace {
+  color: #858585;
+  font-size: 0.875rem;
+  margin-left: 0.5rem;
+}
+
+.instance-addr {
+  color: #ce9178;
+  font-size: 0.875rem;
+}
+
+.fields-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.tree-node {
+  background: #2d2d30;
+  border-radius: 4px;
+  padding: 0.75rem;
+  border-left: 3px solid #3e3e42;
+}
+
+.tree-node-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.field-icon {
+  color: #4ec9b0;
+  font-size: 0.75rem;
+}
+
+.field-name-label {
+  color: #9cdcfe;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.field-type-label {
+  color: #4ec9b0;
+  font-size: 0.75rem;
+  margin-left: auto;
+  font-family: 'Courier New', Courier, monospace;
+}
+
+.tree-node-value {
+  padding-left: 1.25rem;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.875rem;
+}
+
+.value-null {
+  color: #569cd6;
+  font-style: italic;
+}
+
+.value-boolean {
+  color: #569cd6;
+}
+
+.value-number {
+  color: #b5cea8;
+}
+
+.value-string {
+  color: #ce9178;
+}
+
+.value-pointer {
+  color: #dcdcaa;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.value-pointer:hover {
+  color: #4ec9b0;
+  text-decoration: underline;
+}
+
+.pointer-type {
+  color: #858585;
+  font-size: 0.8125rem;
+}
+
+.value-array,
+.value-object {
+  margin: 0.25rem 0;
+}
+
+.array-header,
+.object-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  padding: 0.25rem 0;
+  transition: background 0.15s;
+  border-radius: 2px;
+}
+
+.array-header:hover,
+.object-header:hover {
+  background: #37373d;
+}
+
+.expand-icon {
+  color: #858585;
+  font-size: 0.75rem;
+  width: 12px;
+  display: inline-block;
+}
+
+.array-label,
+.object-label {
+  color: #cccccc;
+  font-weight: 500;
+}
+
+.array-content,
+.object-content {
+  margin-left: 1rem;
+  margin-top: 0.25rem;
+  border-left: 1px solid #3e3e42;
+  padding-left: 1rem;
+}
+
+.array-item {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+}
+
+.item-index {
+  color: #858585;
+  font-size: 0.8125rem;
+  min-width: 40px;
+}
+
+.object-property {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+}
+
+.property-key {
+  color: #9cdcfe;
+  font-weight: 500;
+  min-width: 120px;
+}
+
+.value-unknown {
+  color: #cccccc;
+}
+
+.read-value-btn-inline {
+  background: #0e639c;
+  color: #ffffff;
+  border: none;
+  border-radius: 3px;
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: background 0.15s;
+  margin-left: auto;
+}
+
+.read-value-btn-inline:hover {
+  background: #1177bb;
+}
+
+.read-dict-btn {
+  background: #0e639c;
+  color: #ffffff;
+  border: none;
+  border-radius: 3px;
+  padding: 4px 12px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.read-dict-btn:hover {
+  background: #1177bb;
+}
+
+.dictionary-preview {
+  background: #252526;
+  border: 1px solid #3e3e42;
+  border-radius: 4px;
+  padding: 0.75rem;
+}
+
+.dictionary-preview strong {
+  color: #cccccc;
+  font-size: 0.875rem;
+}
+
+.resolved-value {
+  padding: 0.25rem 0;
+}

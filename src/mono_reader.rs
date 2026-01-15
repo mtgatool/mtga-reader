@@ -58,24 +58,27 @@ impl MonoReader {
 
     #[cfg(target_os = "windows")]
     pub fn read_mono_root_domain(&mut self) -> usize {
-        let mtga_process = match Process::with_pid(*&self.pid) {
-            Ok(process) => Some(process),
+        let mtga_process = match Process::with_pid(self.pid) {
+            Ok(process) => process,
             Err(e) => {
                 eprintln!("Error obtaining process data: {:?}", e);
-                None
+                // Could not open process (permission denied, not found, ...)
+                // Return early with 0 so callers can handle missing domain gracefully
+                return 0;
             }
-        }
-        .unwrap();
+        };
 
         let module = match mtga_process.module(constants::MONO_LIBRARY) {
-            Ok(module) => Some(module),
-            Err(ProcMemError::ModuleNotFound) => None,
+            Ok(module) => module,
+            Err(ProcMemError::ModuleNotFound) => {
+                eprintln!("Mono module not found in process");
+                return 0;
+            }
             Err(e) => {
                 eprintln!("Error obtaining mono dll: {:?}", e);
-                None
+                return 0;
             }
-        }
-        .unwrap();
+        };
 
         // println!("mono-2.0-bdwgc.dll Base addr: {:x?}", module.base_address());
 
@@ -151,41 +154,32 @@ impl MonoReader {
     }
 
     pub fn create_type_definitions(&mut self) -> Vec<usize> {
-        // let type_definitions = Vec::new();
+        self.create_type_definitions_for_image(self.assembly_image_address)
+    }
 
+    pub fn create_type_definitions_for_image(&self, assembly_image_addr: usize) -> Vec<usize> {
         let class_cache_size = self.read_u32(
-            self.assembly_image_address
+            assembly_image_addr
                 + (constants::IMAGE_CLASS_CACHE + constants::HASH_TABLE_SIZE) as usize,
         );
         let class_cache_table_array = self.read_ptr(
-            self.assembly_image_address
+            assembly_image_addr
                 + (constants::IMAGE_CLASS_CACHE + constants::HASH_TABLE_TABLE) as usize,
         );
 
-        // println!("Class cache size: {:?}", class_cache_size);
-
-        // println!("Class cache table array: {:?}", class_cache_table_array);
-
         let mut table_item = 0;
-        // println!(
-        //     "Class cache size: {:?}",
-        //     class_cache_size * constants::SIZE_OF_PTR as u32
-        // );
-
         let mut type_defs: Vec<usize> = Vec::new();
 
         while table_item < (class_cache_size * constants::SIZE_OF_PTR as u32) {
-            //
             let mut definition = self.read_ptr(class_cache_table_array + table_item as usize);
 
-            // If pointer is not null ?
+            // Walk the linked list of classes in this hash bucket
             while definition != 0 {
+                // Add this definition BEFORE moving to next
+                type_defs.push(definition);
+                // Follow the next_class_cache pointer to the next entry in the chain
                 definition = self
                     .read_ptr(definition + constants::TYPE_DEFINITION_NEXT_CLASS_CACHE as usize);
-                if definition != 0 {
-                    // add its address to the list
-                    type_defs.push(definition);
-                }
             }
 
             table_item += constants::SIZE_OF_PTR as u32;
@@ -194,6 +188,62 @@ impl MonoReader {
         return type_defs;
     }
 
+    /// Get all loaded assembly names
+    pub fn get_all_assembly_names(&mut self) -> Vec<String> {
+        let mut assemblies = Vec::new();
+        
+        let offset = self.read_i32(self.mono_root_domain + constants::RIP_PLUS_OFFSET_OFFSET)
+            + constants::RIP_VALUE_OFFSET as i32;
+        let domain = self.read_ptr(self.mono_root_domain + offset as usize);
+        let assembly_array_address =
+            self.read_ptr(domain + constants::REFERENCED_ASSEMBLIES as usize);
+
+        let mut assembly_address = assembly_array_address;
+
+        while assembly_address != 0 {
+            let assembly = self.read_ptr(assembly_address);
+            let assembly_name_address =
+                self.read_ptr(assembly + (constants::SIZE_OF_PTR * 2 as usize));
+            
+            if let Some(name) = self.maybe_read_ascii_string(assembly_name_address) {
+                if !name.is_empty() {
+                    assemblies.push(name);
+                }
+            }
+            assembly_address = self.read_ptr(assembly_address + constants::SIZE_OF_PTR as usize);
+        }
+        
+        assemblies
+    }
+    
+    /// Read assembly image by name
+    pub fn read_assembly_image_by_name(&mut self, target_name: &str) -> usize {
+        let offset = self.read_i32(self.mono_root_domain + constants::RIP_PLUS_OFFSET_OFFSET)
+            + constants::RIP_VALUE_OFFSET as i32;
+        let domain = self.read_ptr(self.mono_root_domain + offset as usize);
+        let assembly_array_address =
+            self.read_ptr(domain + constants::REFERENCED_ASSEMBLIES as usize);
+
+        let mut assembly_address = assembly_array_address;
+
+        while assembly_address != 0 {
+            let assembly = self.read_ptr(assembly_address);
+            let assembly_name_address =
+                self.read_ptr(assembly + (constants::SIZE_OF_PTR * 2 as usize));
+
+            if let Some(assembly_name) = self.maybe_read_ascii_string(assembly_name_address) {
+                if assembly_name == target_name {
+                    self.assembly_image_address =
+                        self.read_ptr(assembly + constants::ASSEMBLY_IMAGE as usize);
+                    return self.assembly_image_address;
+                }
+            }
+            assembly_address = self.read_ptr(assembly_address + constants::SIZE_OF_PTR as usize);
+        }
+        
+        0
+    }
+    
     pub fn read_assembly_image(&mut self) -> usize {
         let offset = self.read_i32(self.mono_root_domain + constants::RIP_PLUS_OFFSET_OFFSET)
             + constants::RIP_VALUE_OFFSET as i32;
@@ -254,33 +304,13 @@ impl MonoReader {
     }
 
     pub fn read_u8(&self, addr: usize) -> u8 {
-        let val = match self.maybe_read_u8(addr) {
-            Some(val) => val,
-            None => {
-                eprintln!("Error: {:?}", std::io::Error::last_os_error());
-                0
-            }
-        };
-
-        return val;
+        self.maybe_read_u8(addr).unwrap_or(0)
     }
 
     pub fn read_u16(&self, addr: usize) -> u16 {
         let mut member = DataMember::<u16>::new(self.handle);
-
         member.set_offset(vec![addr as usize]);
-
-        let val = unsafe {
-            match member.read() {
-                Ok(val) => val,
-                Err(_e) => {
-                    eprintln!("Error: {:?}", std::io::Error::last_os_error());
-                    0
-                }
-            }
-        };
-
-        return val;
+        unsafe { member.read().unwrap_or(0) }
     }
 
     // All read_ methods should be wrapping a maybe_ method
@@ -301,123 +331,51 @@ impl MonoReader {
     }
 
     pub fn read_u32(&self, addr: usize) -> u32 {
-        let val = match self.maybe_read_u32(addr) {
-            Some(val) => val,
-            None => {
-                eprintln!("Error: {:?}", std::io::Error::last_os_error());
-                0
-            }
-        };
-
-        return val;
+        self.maybe_read_u32(addr).unwrap_or(0)
     }
 
     pub fn read_u64(&self, addr: usize) -> u64 {
         let mut member = DataMember::<u64>::new(self.handle);
-
         member.set_offset(vec![addr as usize]);
-
-        let val = unsafe {
-            match member.read() {
-                Ok(val) => val,
-                Err(_e) => {
-                    eprintln!("Error: {:?}", std::io::Error::last_os_error());
-                    0
-                }
-            }
-        };
-
-        return val;
+        unsafe { member.read().unwrap_or(0) }
     }
 
     pub fn read_i8(&self, addr: usize) -> i8 {
         let mut member = DataMember::<i8>::new(self.handle);
-
         member.set_offset(vec![addr as usize]);
-
-        let val = unsafe {
-            match member.read() {
-                Ok(val) => val,
-                Err(_e) => {
-                    eprintln!("Error: {:?}", std::io::Error::last_os_error());
-                    0
-                }
-            }
-        };
-
-        return val;
+        unsafe { member.read().unwrap_or(0) }
     }
 
     pub fn read_i16(&self, addr: usize) -> i16 {
         let mut member = DataMember::<i16>::new(self.handle);
-
         member.set_offset(vec![addr as usize]);
-
-        let val = unsafe {
-            match member.read() {
-                Ok(val) => val,
-                Err(_e) => {
-                    eprintln!("Error: {:?}", std::io::Error::last_os_error());
-                    0
-                }
-            }
-        };
-
-        return val;
+        unsafe { member.read().unwrap_or(0) }
     }
 
     pub fn read_i32(&self, addr: usize) -> i32 {
         let mut member = DataMember::<i32>::new(self.handle);
-
         member.set_offset(vec![addr as usize]);
-
-        let val = unsafe {
-            match member.read() {
-                Ok(val) => val,
-                Err(_e) => {
-                    eprintln!("Error: {:?}", std::io::Error::last_os_error());
-                    0
-                }
-            }
-        };
-
-        return val;
+        unsafe { member.read().unwrap_or(0) }
     }
 
     pub fn read_i64(&self, addr: usize) -> i64 {
         let mut member = DataMember::<i64>::new(self.handle);
-
         member.set_offset(vec![addr as usize]);
-
-        let val = unsafe {
-            match member.read() {
-                Ok(val) => val,
-                Err(_e) => {
-                    eprintln!("Error: {:?}", std::io::Error::last_os_error());
-                    0
-                }
-            }
-        };
-
-        return val;
+        unsafe { member.read().unwrap_or(0) }
     }
 
     pub fn read_ptr(&self, addr: usize) -> usize {
         let mut member = DataMember::<usize>::new(self.handle);
-
         member.set_offset(vec![addr as usize]);
+        unsafe { member.read().unwrap_or(0) }
+    }
 
-        let val = unsafe {
-            match member.read() {
-                Ok(val) => val,
-                Err(_e) => {
-                    eprintln!("Error: {:?}", std::io::Error::last_os_error());
-                    0
-                }
-            }
-        };
-
-        return val;
+    pub fn read_bytes(&self, addr: usize, size: usize) -> Vec<u8> {
+        let mut result = vec![0u8; size];
+        for i in 0..size {
+            result[i] = self.read_u8(addr + i);
+        }
+        result
     }
 
     // This methos will throw and error if the address is not readable
@@ -504,6 +462,43 @@ impl MonoReader {
     pub fn read_ptr_ascii_string(&self, addr: usize) -> String {
         let ptr = self.read_ptr(addr);
         self.read_ascii_string(ptr)
+    }
+
+    /// Read a .NET/Mono String object properly
+    /// MonoString structure:
+    /// - VTable pointer (SIZE_OF_PTR bytes)
+    /// - Monitor/sync block (SIZE_OF_PTR bytes)
+    /// - Length (4 bytes, u32)
+    /// - Character data (UTF-16, 2 bytes per char)
+    pub fn read_mono_string(&self, string_ptr: usize) -> Option<String> {
+        if string_ptr == 0 || string_ptr < 0x10000 {
+            return None;
+        }
+
+        // Read string length from MonoString header
+        let length = self.read_u32(string_ptr + (constants::SIZE_OF_PTR * 2));
+
+        if length == 0 || length > 10000 {
+            return None; // Sanity check: reject empty or unreasonably long strings
+        }
+
+        // Read UTF-16 characters
+        let mut utf16_chars = Vec::new();
+        let chars_offset = string_ptr + (constants::SIZE_OF_PTR * 2) + 4;
+
+        for i in 0..length {
+            let char_val = self.read_u16(chars_offset + (i as usize * 2));
+            utf16_chars.push(char_val);
+        }
+
+        // Decode UTF-16 to Rust String
+        String::from_utf16(&utf16_chars).ok()
+    }
+
+    /// Read a .NET string by first dereferencing a pointer to the string object
+    pub fn read_ptr_mono_string(&self, addr: usize) -> Option<String> {
+        let string_ptr = self.read_ptr(addr);
+        self.read_mono_string(string_ptr)
     }
 
     pub fn read_ptr_ptr(&self, addr: usize) -> usize {

@@ -28,9 +28,9 @@ pub const TYPE_DEFINITION_CLASS_KIND: u32 = 0x1b; // alt: 0x1e + 0xc
 pub const TYPE_DEFINITION_PARENT: u32 = 0x30;
 // nested_in
 pub const TYPE_DEFINITION_NESTED_IN: u32 = 0x38;
-// name
+// name (Unity 2022.3 - confirmed via memory probing)
 pub const TYPE_DEFINITION_NAME: u32 = 0x48;
-// name_space
+// name_space (Unity 2022.3 - confirmed via memory probing)
 pub const TYPE_DEFINITION_NAMESPACE: u32 = 0x50; // 0x48 + 0x8
 
 // vtable_size
@@ -53,7 +53,10 @@ pub const TYPE_DEFINITION_RUNTIME_INFO: u32 = 0x84 + 0x34 + 0x18; // 0xD0
 pub const TYPE_DEFINITION_FIELD_COUNT: u32 = 0xa4 + 0x34 + 0x18 + 0x10; // 0xE0
 
 // next_class_cache
-pub const TYPE_DEFINITION_NEXT_CLASS_CACHE: u32 = 0xa8 + 0x34 + 0x18 + 0x10 + 0x4; // 0xE4
+// Unity 2021.3.14 & 2022.3: 0xa8 + 0x34 + 0x18 + 0x10 + 0x4 = 0x108
+// NOTE: The C# comment says 0xE4 but the actual calculation is 0x108!
+// Verified: 168 + 52 + 24 + 16 + 4 = 264 = 0x108
+pub const TYPE_DEFINITION_NEXT_CLASS_CACHE: u32 = 0x108;
 pub const TYPE_DEFINITION_MONO_GENERIC_CLASS: u32 = 0x94 + 0x34 + 0x18 + 0x10;
 pub const TYPE_DEFINITION_GENERIC_CONTAINER: u32 = 0x110;
 
