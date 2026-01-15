@@ -5,7 +5,17 @@
       "Bash(cargo update:*)",
       "Bash(node:*)",
       "Bash(dir:*)",
-      "Bash(npm test:*)"
+      "Bash(npm test:*)",
+      "Bash(find:*)",
+      "Bash(cargo check:*)",
+      "Bash(pgrep:*)",
+      "Bash(cargo run:*)",
+      "Bash(ls:*)",
+      "Bash(sudo echo:*)",
+      "Bash(sudo cargo run:*)",
+      "Bash(sudo timeout 10 cargo run:*)",
+      "Bash(curl:*)",
+      "Bash(sudo node:*)"
     ]
   }
 }

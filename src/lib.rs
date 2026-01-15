@@ -1,3 +1,14 @@
+// New modular backend architecture
+pub mod common;
+pub mod backend;
+
+#[cfg(feature = "mono")]
+pub mod mono;
+
+#[cfg(feature = "il2cpp")]
+pub mod il2cpp;
+
+// Legacy modules (kept for backward compatibility)
 pub mod constants;
 pub mod field_definition;
 pub mod managed;

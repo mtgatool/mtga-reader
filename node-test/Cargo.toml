@@ -15,8 +15,17 @@ napi-derive = "2.16.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
+# Process finding (only for Windows)
+[target.'cfg(target_os = "windows")'.dependencies]
+sysinfo = "0.30.11"
+
 # Reference to the main mtga-reader library (package name uses hyphen, lib name uses underscore)
 mtga-reader = { path = ".." }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+mach2 = "0.4"
+libproc = "0.14"
+libc = "0.2"
 
 [build-dependencies]
 napi-build = "2.1.3"

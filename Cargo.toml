@@ -8,6 +8,11 @@ crate-type = ["cdylib", "lib"]
 name = "mtga_reader"
 path = "src/lib.rs"
 
+[features]
+default = ["mono", "il2cpp"]
+mono = []
+il2cpp = []
+
 [dependencies]
 is_elevated = "0.1.2"
 # Default enable napi4 feature, see https://nodejs.org/api/n-api.html#node-api-version-matrix
@@ -30,6 +35,10 @@ proc_mem = "0.1.6"
 is_elevated = "0.1.2"
 pelite = "0.10"
 winapi = { version = "0.3", features = ["psapi", "processthreadsapi", "handleapi", "winnt"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+mach2 = "0.4"
+libproc = "0.14"
 
 [build-dependencies]
 napi-build = "2.0.1"

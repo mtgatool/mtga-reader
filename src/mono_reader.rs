@@ -12,6 +12,7 @@ use sysinfo::{Pid, System};
 use process_memory::{DataMember, Memory, ProcessHandle, TryIntoProcessHandle};
 
 use crate::constants;
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 use crate::pe_reader::PEReader;
 
 pub struct MonoReader {
@@ -53,6 +54,16 @@ impl MonoReader {
         #[cfg(target_os = "linux")]
         {
             return sudo::check() == RunningAs::Root;
+        }
+        #[cfg(target_os = "macos")]
+        {
+            // On macOS, check if running as root using std
+            // For memory reading, we need debugging entitlements or root
+            return std::process::id() == 0 || std::env::var("SUDO_USER").is_ok();
+        }
+        #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+        {
+            return false;
         }
     }
 
