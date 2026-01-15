@@ -1,6 +1,6 @@
 const path = require('path');
 
-// Load the native addon directly
+// Load the native addon
 const nativeBinding = require(path.join(__dirname, 'mtga_reader_node.node'));
 
 // Utility functions

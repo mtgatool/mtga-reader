@@ -4,7 +4,8 @@
       "Bash(cargo build:*)",
       "Bash(cargo update:*)",
       "Bash(node:*)",
-      "Bash(dir:*)"
+      "Bash(dir:*)",
+      "Bash(npm test:*)"
     ]
   }
 }
