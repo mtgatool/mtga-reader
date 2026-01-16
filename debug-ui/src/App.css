@@ -83,14 +83,43 @@
   margin-right: 0.5rem;
 }
 
+.path-error-banner {
+  background: #4a3a1d;
+  border-left: 4px solid #cca700;
+  padding: 0.75rem 1.5rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: #cca700;
+  font-size: 0.875rem;
+}
+
+.path-error-banner strong {
+  margin-right: 0.5rem;
+}
+
+.path-error-banner .failed-segment {
+  font-family: 'Consolas', 'Monaco', monospace;
+  background: rgba(204, 167, 0, 0.2);
+  padding: 0.125rem 0.5rem;
+  border-radius: 4px;
+  margin-left: 0.5rem;
+}
+
 .close-btn {
   background: none;
   border: none;
-  color: #f48771;
+  color: inherit;
   font-size: 1.5rem;
   cursor: pointer;
   padding: 0 0.5rem;
   line-height: 1;
+  opacity: 0.7;
+  transition: opacity 0.15s;
+}
+
+.close-btn:hover {
+  opacity: 1;
 }
 
 .main-content {

@@ -156,6 +156,12 @@ pub trait MemoryReader {
     /// Read a signed 64-bit integer
     fn read_i64(&self, addr: usize) -> i64;
 
+    /// Read a 32-bit floating point number
+    fn read_f32(&self, addr: usize) -> f32;
+
+    /// Read a 64-bit floating point number
+    fn read_f64(&self, addr: usize) -> f64;
+
     /// Read a pointer (platform-sized)
     fn read_ptr(&self, addr: usize) -> usize;
 

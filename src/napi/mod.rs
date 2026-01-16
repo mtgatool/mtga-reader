@@ -263,6 +263,12 @@ mod windows_backend {
 
             for field_addr in &field_addrs {
                 let field = FieldDefinition::new(*field_addr, reader);
+
+                // Skip static fields - their values are not stored in the instance
+                if field.type_info.is_static {
+                    continue;
+                }
+
                 let type_name = get_instance_type_name(&field, reader);
                 let value = read_field_value(reader, address, &field, &type_name);
 
@@ -447,33 +453,50 @@ mod windows_backend {
     ) -> serde_json::Value {
         let addr = base_addr + field.offset as usize;
 
-        match type_name {
-            "System.Int32" | "int" => serde_json::json!(reader.read_i32(addr)),
-            "System.Int64" | "long" => serde_json::json!(reader.read_i64(addr)),
-            "System.UInt32" | "uint" => serde_json::json!(reader.read_u32(addr)),
-            "System.Boolean" | "bool" | "BOOLEAN" => serde_json::json!(reader.read_u8(addr) != 0),
-            "System.String" | "string" => {
-                let str_ptr = reader.read_ptr(addr);
-                if str_ptr == 0 {
-                    serde_json::Value::Null
-                } else {
-                    match reader.read_mono_string(str_ptr) {
-                        Some(s) => serde_json::json!(s),
-                        None => serde_json::Value::Null,
-                    }
+        // Use contains() for more robust type matching
+        // Check UInt32 before Int32 since "UInt32" contains "Int32"
+        if type_name.contains("UInt32") || type_name == "uint" {
+            serde_json::json!(reader.read_u32(addr))
+        } else if type_name.contains("Int32") || type_name == "int" {
+            serde_json::json!(reader.read_i32(addr))
+        } else if type_name.contains("UInt64") || type_name == "ulong" {
+            serde_json::json!(reader.read_u64(addr))
+        } else if type_name.contains("Int64") || type_name == "long" {
+            serde_json::json!(reader.read_i64(addr))
+        } else if type_name.contains("UInt16") || type_name == "ushort" {
+            serde_json::json!(reader.read_u16(addr))
+        } else if type_name.contains("Int16") || type_name == "short" {
+            serde_json::json!(reader.read_i16(addr))
+        } else if type_name.contains("Byte") && !type_name.contains("SByte") || type_name == "byte" {
+            serde_json::json!(reader.read_u8(addr))
+        } else if type_name.contains("SByte") || type_name == "sbyte" {
+            serde_json::json!(reader.read_i8(addr))
+        } else if type_name.contains("Single") || type_name == "float" {
+            serde_json::json!(reader.read_f32(addr))
+        } else if type_name.contains("Double") || type_name == "double" {
+            serde_json::json!(reader.read_f64(addr))
+        } else if type_name.contains("Boolean") || type_name == "bool" {
+            serde_json::json!(reader.read_u8(addr) != 0)
+        } else if type_name.contains("String") || type_name == "string" {
+            let str_ptr = reader.read_ptr(addr);
+            if str_ptr == 0 {
+                serde_json::Value::Null
+            } else {
+                match reader.read_mono_string(str_ptr) {
+                    Some(s) => serde_json::json!(s),
+                    None => serde_json::Value::Null,
                 }
             }
-            _ => {
-                let ptr = reader.read_ptr(addr);
-                if ptr == 0 {
-                    serde_json::Value::Null
-                } else {
-                    serde_json::json!({
-                        "type": "pointer",
-                        "address": ptr,
-                        "class_name": type_name
-                    })
-                }
+        } else {
+            let ptr = reader.read_ptr(addr);
+            if ptr == 0 {
+                serde_json::Value::Null
+            } else {
+                serde_json::json!({
+                    "type": "pointer",
+                    "address": ptr,
+                    "class_name": type_name
+                })
             }
         }
     }
@@ -484,47 +507,88 @@ mod windows_backend {
         type_name: &str,
         field: &FieldDefinition,
     ) -> serde_json::Value {
-        match type_name {
-            "System.Int32" => serde_json::json!({
-                "type": "primitive",
-                "value_type": "int32",
-                "value": reader.read_i32(field_location)
-            }),
-            "System.UInt32" => serde_json::json!({
+        // Use contains() for more robust type matching
+        // Check UInt32 before Int32 since "UInt32" contains "Int32"
+        if type_name.contains("UInt32") || type_name == "uint" {
+            serde_json::json!({
                 "type": "primitive",
                 "value_type": "uint32",
                 "value": reader.read_u32(field_location)
-            }),
-            "System.Int64" => serde_json::json!({
+            })
+        } else if type_name.contains("Int32") || type_name == "int" {
+            serde_json::json!({
                 "type": "primitive",
-                "value_type": "int64",
-                "value": reader.read_i64(field_location)
-            }),
-            "System.UInt64" => serde_json::json!({
+                "value_type": "int32",
+                "value": reader.read_i32(field_location)
+            })
+        } else if type_name.contains("UInt64") || type_name == "ulong" {
+            serde_json::json!({
                 "type": "primitive",
                 "value_type": "uint64",
                 "value": reader.read_u64(field_location).to_string()
-            }),
-            "System.Boolean" => serde_json::json!({
+            })
+        } else if type_name.contains("Int64") || type_name == "long" {
+            serde_json::json!({
+                "type": "primitive",
+                "value_type": "int64",
+                "value": reader.read_i64(field_location)
+            })
+        } else if type_name.contains("UInt16") || type_name == "ushort" {
+            serde_json::json!({
+                "type": "primitive",
+                "value_type": "uint16",
+                "value": reader.read_u16(field_location)
+            })
+        } else if type_name.contains("Int16") || type_name == "short" {
+            serde_json::json!({
+                "type": "primitive",
+                "value_type": "int16",
+                "value": reader.read_i16(field_location)
+            })
+        } else if type_name.contains("Byte") && !type_name.contains("SByte") || type_name == "byte" {
+            serde_json::json!({
+                "type": "primitive",
+                "value_type": "byte",
+                "value": reader.read_u8(field_location)
+            })
+        } else if type_name.contains("SByte") || type_name == "sbyte" {
+            serde_json::json!({
+                "type": "primitive",
+                "value_type": "sbyte",
+                "value": reader.read_i8(field_location)
+            })
+        } else if type_name.contains("Single") || type_name == "float" {
+            serde_json::json!({
+                "type": "primitive",
+                "value_type": "float",
+                "value": reader.read_f32(field_location)
+            })
+        } else if type_name.contains("Double") || type_name == "double" {
+            serde_json::json!({
+                "type": "primitive",
+                "value_type": "double",
+                "value": reader.read_f64(field_location)
+            })
+        } else if type_name.contains("Boolean") || type_name == "bool" {
+            serde_json::json!({
                 "type": "primitive",
                 "value_type": "boolean",
                 "value": reader.read_u8(field_location) != 0
-            }),
-            _ => {
-                let ptr = reader.read_ptr(field_location);
-                if ptr == 0 {
-                    serde_json::json!({
-                        "type": "null",
-                        "address": 0
-                    })
-                } else {
-                    serde_json::json!({
-                        "type": "pointer",
-                        "address": ptr,
-                        "field_name": field.name,
-                        "class_name": type_name
-                    })
-                }
+            })
+        } else {
+            let ptr = reader.read_ptr(field_location);
+            if ptr == 0 {
+                serde_json::json!({
+                    "type": "null",
+                    "address": 0
+                })
+            } else {
+                serde_json::json!({
+                    "type": "pointer",
+                    "address": ptr,
+                    "field_name": field.name,
+                    "class_name": type_name
+                })
             }
         }
     }
@@ -937,14 +1001,45 @@ mod macos_backend {
 
     fn read_field_value(reader: &MemReader, instance_addr: usize, field: &FieldInfo) -> serde_json::Value {
         let field_addr = instance_addr + field.offset as usize;
+        let type_name = &field.type_name;
 
-        if field.type_name.contains("Int32") || field.type_name.contains("int") {
+        // Use contains() for more robust type matching
+        // Check UInt32 before Int32 since "UInt32" contains "Int32"
+        if type_name.contains("UInt32") || type_name == "uint" {
+            return serde_json::json!(reader.read_u32(field_addr));
+        }
+        if type_name.contains("Int32") || type_name == "int" {
             return serde_json::json!(reader.read_i32(field_addr));
         }
-        if field.type_name.contains("Boolean") || field.type_name.contains("bool") {
+        if type_name.contains("UInt64") || type_name == "ulong" {
+            return serde_json::json!(reader.read_u64(field_addr));
+        }
+        if type_name.contains("Int64") || type_name == "long" {
+            return serde_json::json!(reader.read_i64(field_addr));
+        }
+        if type_name.contains("UInt16") || type_name == "ushort" {
+            return serde_json::json!(reader.read_u16(field_addr));
+        }
+        if type_name.contains("Int16") || type_name == "short" {
+            return serde_json::json!(reader.read_i16(field_addr));
+        }
+        if type_name.contains("Byte") && !type_name.contains("SByte") || type_name == "byte" {
+            return serde_json::json!(reader.read_u8(field_addr));
+        }
+        if type_name.contains("SByte") || type_name == "sbyte" {
+            return serde_json::json!(reader.read_i8(field_addr));
+        }
+        if type_name.contains("Single") || type_name == "float" {
+            return serde_json::json!(reader.read_f32(field_addr));
+        }
+        if type_name.contains("Double") || type_name == "double" {
+            return serde_json::json!(reader.read_f64(field_addr));
+        }
+        if type_name.contains("Boolean") || type_name == "bool" {
             return serde_json::json!(reader.read_u8(field_addr) != 0);
         }
 
+        // For reference types, read as pointer
         let ptr = reader.read_ptr(field_addr);
         if ptr == 0 {
             return serde_json::Value::Null;
@@ -961,6 +1056,7 @@ mod macos_backend {
             });
         }
 
+        // Fallback
         serde_json::json!(reader.read_i32(field_addr))
     }
 

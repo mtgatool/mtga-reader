@@ -114,7 +114,7 @@ function ClassExplorer({ assembly, selectedClass, onSelectClass, onSelectInstanc
                     <div
                       key={inst.field_name}
                       className="instance-item"
-                      onClick={() => inst.address && onSelectInstance(inst.address)}
+                      onClick={() => inst.address && onSelectInstance(inst)}
                     >
                       <span className="instance-icon">🎯</span>
                       <div className="instance-info">

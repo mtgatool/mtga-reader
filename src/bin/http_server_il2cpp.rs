@@ -336,6 +336,99 @@ async fn read_static_field(
         }
 
         let field_addr = static_fields + field.offset as usize;
+
+        // Handle primitive types correctly (read as their actual size, not as pointer)
+        let type_name = &field.type_name;
+        if type_name.contains("UInt32") || type_name == "uint" {
+            let value = state.reader.read_u32(field_addr);
+            return Ok(serde_json::json!({
+                "type": "primitive",
+                "value_type": "uint32",
+                "value": value
+            }));
+        }
+        if type_name.contains("Int32") || type_name == "int" {
+            let value = state.reader.read_i32(field_addr);
+            return Ok(serde_json::json!({
+                "type": "primitive",
+                "value_type": "int32",
+                "value": value
+            }));
+        }
+        if type_name.contains("UInt64") || type_name == "ulong" {
+            let value = state.reader.read_u64(field_addr);
+            return Ok(serde_json::json!({
+                "type": "primitive",
+                "value_type": "uint64",
+                "value": value
+            }));
+        }
+        if type_name.contains("Int64") || type_name == "long" {
+            let value = state.reader.read_i64(field_addr);
+            return Ok(serde_json::json!({
+                "type": "primitive",
+                "value_type": "int64",
+                "value": value
+            }));
+        }
+        if type_name.contains("Single") || type_name == "float" {
+            let value = state.reader.read_f32(field_addr);
+            return Ok(serde_json::json!({
+                "type": "primitive",
+                "value_type": "float",
+                "value": value
+            }));
+        }
+        if type_name.contains("Double") || type_name == "double" {
+            let value = state.reader.read_f64(field_addr);
+            return Ok(serde_json::json!({
+                "type": "primitive",
+                "value_type": "double",
+                "value": value
+            }));
+        }
+        if type_name.contains("Boolean") || type_name == "bool" {
+            let value = state.reader.read_u8(field_addr) != 0;
+            return Ok(serde_json::json!({
+                "type": "primitive",
+                "value_type": "bool",
+                "value": value
+            }));
+        }
+        if type_name.contains("Byte") || type_name == "byte" {
+            let value = state.reader.read_u8(field_addr);
+            return Ok(serde_json::json!({
+                "type": "primitive",
+                "value_type": "byte",
+                "value": value
+            }));
+        }
+        if type_name.contains("SByte") || type_name == "sbyte" {
+            let value = state.reader.read_i8(field_addr);
+            return Ok(serde_json::json!({
+                "type": "primitive",
+                "value_type": "sbyte",
+                "value": value
+            }));
+        }
+        if type_name.contains("Int16") || type_name == "short" {
+            let value = state.reader.read_i16(field_addr);
+            return Ok(serde_json::json!({
+                "type": "primitive",
+                "value_type": "int16",
+                "value": value
+            }));
+        }
+        if type_name.contains("UInt16") || type_name == "ushort" {
+            let value = state.reader.read_u16(field_addr);
+            return Ok(serde_json::json!({
+                "type": "primitive",
+                "value_type": "uint16",
+                "value": value
+            }));
+        }
+
+        // For reference types, read as pointer
         let value = state.reader.read_ptr(field_addr);
 
         if value == 0 {
@@ -597,16 +690,45 @@ fn get_class_fields(reader: &MemReader, class_addr: usize) -> Vec<FieldInfo> {
 
 fn read_field_value(reader: &MemReader, instance_addr: usize, field: &FieldInfo) -> serde_json::Value {
     let field_addr = instance_addr + field.offset as usize;
+    let type_name = &field.type_name;
 
-    // For small offsets, might be a primitive
-    if field.type_name.contains("Int32") || field.type_name.contains("int") {
+    // Handle primitive types correctly (read as their actual size)
+    // Note: Check UInt32 before Int32 since "UInt32" contains "Int32"
+    if type_name.contains("UInt32") || type_name == "uint" {
+        return serde_json::json!(reader.read_u32(field_addr));
+    }
+    if type_name.contains("Int32") || type_name == "int" {
         return serde_json::json!(reader.read_i32(field_addr));
     }
-    if field.type_name.contains("Boolean") || field.type_name.contains("bool") {
+    if type_name.contains("UInt64") || type_name == "ulong" {
+        return serde_json::json!(reader.read_u64(field_addr));
+    }
+    if type_name.contains("Int64") || type_name == "long" {
+        return serde_json::json!(reader.read_i64(field_addr));
+    }
+    if type_name.contains("Single") || type_name == "float" {
+        return serde_json::json!(reader.read_f32(field_addr));
+    }
+    if type_name.contains("Double") || type_name == "double" {
+        return serde_json::json!(reader.read_f64(field_addr));
+    }
+    if type_name.contains("Boolean") || type_name == "bool" {
         return serde_json::json!(reader.read_u8(field_addr) != 0);
     }
+    if type_name.contains("Byte") || type_name == "byte" {
+        return serde_json::json!(reader.read_u8(field_addr));
+    }
+    if type_name.contains("SByte") || type_name == "sbyte" {
+        return serde_json::json!(reader.read_i8(field_addr));
+    }
+    if type_name.contains("Int16") || type_name == "short" {
+        return serde_json::json!(reader.read_i16(field_addr));
+    }
+    if type_name.contains("UInt16") || type_name == "ushort" {
+        return serde_json::json!(reader.read_u16(field_addr));
+    }
 
-    // Try reading as pointer
+    // Try reading as pointer for reference types
     let ptr = reader.read_ptr(field_addr);
     if ptr == 0 {
         return serde_json::Value::Null;
@@ -624,7 +746,7 @@ fn read_field_value(reader: &MemReader, instance_addr: usize, field: &FieldInfo)
         });
     }
 
-    // Might be a small integer stored directly
+    // Fallback - might be a small integer stored directly
     serde_json::json!(reader.read_i32(field_addr))
 }
 
@@ -780,6 +902,40 @@ impl MemReader {
     fn read_u8(&self, addr: usize) -> u8 {
         let bytes = self.read_bytes(addr, 1);
         bytes.first().copied().unwrap_or(0)
+    }
+
+    fn read_i8(&self, addr: usize) -> i8 {
+        self.read_u8(addr) as i8
+    }
+
+    fn read_u16(&self, addr: usize) -> u16 {
+        let bytes = self.read_bytes(addr, 2);
+        u16::from_le_bytes(bytes.try_into().unwrap_or([0; 2]))
+    }
+
+    fn read_i16(&self, addr: usize) -> i16 {
+        let bytes = self.read_bytes(addr, 2);
+        i16::from_le_bytes(bytes.try_into().unwrap_or([0; 2]))
+    }
+
+    fn read_u64(&self, addr: usize) -> u64 {
+        let bytes = self.read_bytes(addr, 8);
+        u64::from_le_bytes(bytes.try_into().unwrap_or([0; 8]))
+    }
+
+    fn read_i64(&self, addr: usize) -> i64 {
+        let bytes = self.read_bytes(addr, 8);
+        i64::from_le_bytes(bytes.try_into().unwrap_or([0; 8]))
+    }
+
+    fn read_f32(&self, addr: usize) -> f32 {
+        let bytes = self.read_bytes(addr, 4);
+        f32::from_le_bytes(bytes.try_into().unwrap_or([0; 4]))
+    }
+
+    fn read_f64(&self, addr: usize) -> f64 {
+        let bytes = self.read_bytes(addr, 8);
+        f64::from_le_bytes(bytes.try_into().unwrap_or([0; 8]))
     }
 
     fn read_string(&self, addr: usize) -> String {

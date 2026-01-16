@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import './InstanceViewer.css'
 
-function InstanceViewer({ instance, onNavigate, loading }) {
+function InstanceViewer({ instance, onNavigate, navigationPath, loading }) {
   const [expandedNodes, setExpandedNodes] = useState(new Set())
   const [fieldValues, setFieldValues] = useState(new Map())
   const [dictionaryData, setDictionaryData] = useState(new Map())
@@ -62,10 +62,12 @@ function InstanceViewer({ instance, onNavigate, loading }) {
     }
 
     if (value.type === 'pointer') {
+      // Extract field name from path for navigation context
+      const fieldName = path ? path.split('.').pop().replace(/\[\d+\]$/, '') : null
       return (
         <span
           className="value-pointer"
-          onClick={() => value.address && onNavigate(value.address)}
+          onClick={() => value.address && onNavigate(value.address, fieldName)}
           title="Click to navigate"
         >
           → 0x{value.address?.toString(16)}
@@ -186,7 +188,7 @@ function InstanceViewer({ instance, onNavigate, loading }) {
                           <div>
                             <span
                               className="value-pointer"
-                              onClick={() => onNavigate(storedValue.address)}
+                              onClick={() => onNavigate(storedValue.address, field.name)}
                               title="Click to navigate"
                             >
                               → 0x{storedValue.address.toString(16)}

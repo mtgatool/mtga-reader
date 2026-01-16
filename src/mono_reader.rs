@@ -375,6 +375,18 @@ impl MonoReader {
         unsafe { member.read().unwrap_or(0) }
     }
 
+    pub fn read_f32(&self, addr: usize) -> f32 {
+        let mut member = DataMember::<f32>::new(self.handle);
+        member.set_offset(vec![addr as usize]);
+        unsafe { member.read().unwrap_or(0.0) }
+    }
+
+    pub fn read_f64(&self, addr: usize) -> f64 {
+        let mut member = DataMember::<f64>::new(self.handle);
+        member.set_offset(vec![addr as usize]);
+        unsafe { member.read().unwrap_or(0.0) }
+    }
+
     pub fn read_ptr(&self, addr: usize) -> usize {
         let mut member = DataMember::<usize>::new(self.handle);
         member.set_offset(vec![addr as usize]);

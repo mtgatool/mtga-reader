@@ -457,6 +457,34 @@ impl MemoryReader for Il2CppBackend {
     }
 
     #[cfg(any(target_os = "windows", target_os = "linux"))]
+    fn read_f32(&self, addr: usize) -> f32 {
+        use process_memory::DataMember;
+        let mut member = DataMember::<f32>::new(self.handle);
+        member.set_offset(vec![addr]);
+        unsafe { member.read().unwrap_or(0.0) }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn read_f32(&self, addr: usize) -> f32 {
+        // Read as u32 and transmute to f32
+        f32::from_bits(self.read_u32(addr))
+    }
+
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    fn read_f64(&self, addr: usize) -> f64 {
+        use process_memory::DataMember;
+        let mut member = DataMember::<f64>::new(self.handle);
+        member.set_offset(vec![addr]);
+        unsafe { member.read().unwrap_or(0.0) }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn read_f64(&self, addr: usize) -> f64 {
+        // Read as u64 and transmute to f64
+        f64::from_bits(self.read_u64(addr))
+    }
+
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     fn read_ptr(&self, addr: usize) -> usize {
         use process_memory::DataMember;
         let mut member = DataMember::<usize>::new(self.handle);

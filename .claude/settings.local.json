@@ -21,7 +21,9 @@
       "Bash(sudo npm run demo:*)",
       "Bash(yarn install:*)",
       "Bash(npm install:*)",
-      "Bash(npx napi build:*)"
+      "Bash(npx napi build:*)",
+      "Bash(grep:*)",
+      "Bash(python -c:*)"
     ]
   }
 }

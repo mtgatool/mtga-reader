@@ -1,0 +1,98 @@
+.path-breadcrumb {
+  background: #252526;
+  border-bottom: 1px solid #3c3c3c;
+  padding: 0.5rem 1rem;
+}
+
+.breadcrumb-container {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.breadcrumb-label {
+  color: #858585;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.breadcrumb-segments {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.breadcrumb-segment {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  background: #2d2d30;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.breadcrumb-segment:hover:not(.current) {
+  background: #094771;
+}
+
+.breadcrumb-segment.current {
+  background: #094771;
+  cursor: default;
+}
+
+.breadcrumb-segment.failed {
+  background: #5a1d1d;
+  border: 1px solid #f44747;
+}
+
+.segment-icon {
+  font-size: 0.75rem;
+}
+
+.segment-value {
+  color: #d4d4d4;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.breadcrumb-separator {
+  color: #858585;
+  font-size: 0.75rem;
+}
+
+.copy-url-btn {
+  background: #2d2d30;
+  border: 1px solid #3c3c3c;
+  border-radius: 4px;
+  padding: 0.25rem 0.5rem;
+  cursor: pointer;
+  font-size: 0.875rem;
+  transition: background 0.15s;
+  margin-left: auto;
+}
+
+.copy-url-btn:hover {
+  background: #094771;
+}
+
+.url-display {
+  margin-top: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  background: #1e1e1e;
+  border-radius: 4px;
+  overflow-x: auto;
+}
+
+.url-display code {
+  font-size: 0.75rem;
+  color: #9cdcfe;
+  word-break: break-all;
+}

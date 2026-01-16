@@ -237,6 +237,13 @@ async fn get_instance(
         let mut fields = Vec::new();
         for field_addr in &field_addrs {
             let field = FieldDefinition::new(*field_addr, &reader);
+
+            // Skip static fields - their values are not stored in the instance
+            // They need to be read from the static data area via read_static_field
+            if field.type_info.is_static {
+                continue;
+            }
+
             // Get type name
             let type_name = match field.type_info.clone().code() {
                 TypeCode::CLASS | TypeCode::VALUETYPE | TypeCode::GENERICINST => {
@@ -267,46 +274,63 @@ async fn get_instance(
             };
 
             // Read field value based on type
-            let value = match type_name.as_str() {
-                "System.Int32" | "int" => {
-                    let val = reader.read_i32(address + field.offset as usize);
-                    serde_json::json!(val)
-                }
-                "System.Int64" | "long" => {
-                    let val = reader.read_i64(address + field.offset as usize);
-                    serde_json::json!(val)
-                }
-                "System.UInt32" | "uint" => {
-                    let val = reader.read_u32(address + field.offset as usize);
-                    serde_json::json!(val)
-                }
-                "System.Boolean" | "bool" | "BOOLEAN" => {
-                    let val = reader.read_u8(address + field.offset as usize);
-                    serde_json::json!(val != 0)
-                }
-                "System.String" | "string" => {
-                    let str_ptr = reader.read_ptr(address + field.offset as usize);
-                    if str_ptr == 0 {
-                        serde_json::Value::Null
-                    } else {
-                        match reader.read_mono_string(str_ptr) {
-                            Some(s) => serde_json::json!(s),
-                            None => serde_json::Value::Null,
-                        }
+            // Use contains() for more robust type matching
+            let field_addr = address + field.offset as usize;
+            let value = if type_name.contains("UInt32") || type_name == "uint" {
+                // Check UInt32 before Int32 since "UInt32" contains "Int32"
+                let val = reader.read_u32(field_addr);
+                serde_json::json!(val)
+            } else if type_name.contains("Int32") || type_name == "int" {
+                let val = reader.read_i32(field_addr);
+                serde_json::json!(val)
+            } else if type_name.contains("UInt64") || type_name == "ulong" {
+                let val = reader.read_u64(field_addr);
+                serde_json::json!(val)
+            } else if type_name.contains("Int64") || type_name == "long" {
+                let val = reader.read_i64(field_addr);
+                serde_json::json!(val)
+            } else if type_name.contains("UInt16") || type_name == "ushort" {
+                let val = reader.read_u16(field_addr);
+                serde_json::json!(val)
+            } else if type_name.contains("Int16") || type_name == "short" {
+                let val = reader.read_i16(field_addr);
+                serde_json::json!(val)
+            } else if type_name.contains("Byte") && !type_name.contains("SByte") || type_name == "byte" {
+                let val = reader.read_u8(field_addr);
+                serde_json::json!(val)
+            } else if type_name.contains("SByte") || type_name == "sbyte" {
+                let val = reader.read_i8(field_addr);
+                serde_json::json!(val)
+            } else if type_name.contains("Single") || type_name == "float" {
+                let val = reader.read_f32(field_addr);
+                serde_json::json!(val)
+            } else if type_name.contains("Double") || type_name == "double" {
+                let val = reader.read_f64(field_addr);
+                serde_json::json!(val)
+            } else if type_name.contains("Boolean") || type_name == "bool" {
+                let val = reader.read_u8(field_addr);
+                serde_json::json!(val != 0)
+            } else if type_name.contains("String") || type_name == "string" {
+                let str_ptr = reader.read_ptr(field_addr);
+                if str_ptr == 0 {
+                    serde_json::Value::Null
+                } else {
+                    match reader.read_mono_string(str_ptr) {
+                        Some(s) => serde_json::json!(s),
+                        None => serde_json::Value::Null,
                     }
                 }
-                _ => {
-                    // Assume it's a pointer/reference type
-                    let ptr = reader.read_ptr(address + field.offset as usize);
-                    if ptr == 0 {
-                        serde_json::Value::Null
-                    } else {
-                        serde_json::json!({
-                            "type": "pointer",
-                            "address": ptr,
-                            "class_name": type_name
-                        })
-                    }
+            } else {
+                // Assume it's a pointer/reference type
+                let ptr = reader.read_ptr(field_addr);
+                if ptr == 0 {
+                    serde_json::Value::Null
+                } else {
+                    serde_json::json!({
+                        "type": "pointer",
+                        "address": ptr,
+                        "class_name": type_name
+                    })
                 }
             };
 
@@ -380,64 +404,100 @@ async fn read_instance_field(
             _ => format!("TypeCode({})", field.type_info.type_code)
         };
 
-        // Read value based on type
-        let result = match type_name.as_str() {
-            "System.Int32" => {
-                let val = reader.read_i32(field_location);
+        // Read value based on type (use contains() for more robust matching)
+        let result = if type_name.contains("UInt32") || type_name == "uint" {
+            // Check UInt32 before Int32 since "UInt32" contains "Int32"
+            let val = reader.read_u32(field_location);
+            serde_json::json!({
+                "type": "primitive",
+                "value_type": "uint32",
+                "value": val
+            })
+        } else if type_name.contains("Int32") || type_name == "int" {
+            let val = reader.read_i32(field_location);
+            serde_json::json!({
+                "type": "primitive",
+                "value_type": "int32",
+                "value": val
+            })
+        } else if type_name.contains("UInt64") || type_name == "ulong" {
+            let val = reader.read_u64(field_location);
+            serde_json::json!({
+                "type": "primitive",
+                "value_type": "uint64",
+                "value": val.to_string()
+            })
+        } else if type_name.contains("Int64") || type_name == "long" {
+            let val = reader.read_i64(field_location);
+            serde_json::json!({
+                "type": "primitive",
+                "value_type": "int64",
+                "value": val
+            })
+        } else if type_name.contains("UInt16") || type_name == "ushort" {
+            let val = reader.read_u16(field_location);
+            serde_json::json!({
+                "type": "primitive",
+                "value_type": "uint16",
+                "value": val
+            })
+        } else if type_name.contains("Int16") || type_name == "short" {
+            let val = reader.read_i16(field_location);
+            serde_json::json!({
+                "type": "primitive",
+                "value_type": "int16",
+                "value": val
+            })
+        } else if type_name.contains("Byte") && !type_name.contains("SByte") || type_name == "byte" {
+            let val = reader.read_u8(field_location);
+            serde_json::json!({
+                "type": "primitive",
+                "value_type": "byte",
+                "value": val
+            })
+        } else if type_name.contains("SByte") || type_name == "sbyte" {
+            let val = reader.read_i8(field_location);
+            serde_json::json!({
+                "type": "primitive",
+                "value_type": "sbyte",
+                "value": val
+            })
+        } else if type_name.contains("Single") || type_name == "float" {
+            let val = reader.read_f32(field_location);
+            serde_json::json!({
+                "type": "primitive",
+                "value_type": "float",
+                "value": val
+            })
+        } else if type_name.contains("Double") || type_name == "double" {
+            let val = reader.read_f64(field_location);
+            serde_json::json!({
+                "type": "primitive",
+                "value_type": "double",
+                "value": val
+            })
+        } else if type_name.contains("Boolean") || type_name == "bool" {
+            let val = reader.read_u8(field_location);
+            serde_json::json!({
+                "type": "primitive",
+                "value_type": "boolean",
+                "value": val != 0
+            })
+        } else {
+            // For reference types, read as pointer
+            let ptr = reader.read_ptr(field_location);
+            if ptr == 0 {
                 serde_json::json!({
-                    "type": "primitive",
-                    "value_type": "int32",
-                    "value": val
+                    "type": "null",
+                    "address": 0
                 })
-            }
-            "System.UInt32" => {
-                let val = reader.read_u32(field_location);
+            } else {
                 serde_json::json!({
-                    "type": "primitive",
-                    "value_type": "uint32",
-                    "value": val
+                    "type": "pointer",
+                    "address": ptr,
+                    "field_name": field.name,
+                    "class_name": type_name
                 })
-            }
-            "System.Int64" => {
-                let val = reader.read_i64(field_location);
-                serde_json::json!({
-                    "type": "primitive",
-                    "value_type": "int64",
-                    "value": val
-                })
-            }
-            "System.UInt64" => {
-                let val = reader.read_u64(field_location);
-                serde_json::json!({
-                    "type": "primitive",
-                    "value_type": "uint64",
-                    "value": val.to_string()
-                })
-            }
-            "System.Boolean" => {
-                let val = reader.read_u8(field_location);
-                serde_json::json!({
-                    "type": "primitive",
-                    "value_type": "boolean",
-                    "value": val != 0
-                })
-            }
-            _ => {
-                // For reference types, read as pointer
-                let ptr = reader.read_ptr(field_location);
-                if ptr == 0 {
-                    serde_json::json!({
-                        "type": "null",
-                        "address": 0
-                    })
-                } else {
-                    serde_json::json!({
-                        "type": "pointer",
-                        "address": ptr,
-                        "field_name": field.name,
-                        "class_name": type_name
-                    })
-                }
             }
         };
 
@@ -478,7 +538,33 @@ async fn read_static_field(
             return Err(StatusCode::BAD_REQUEST); // Not a static field
         }
 
-        // Use the fixed get_static_value method
+        // For const fields, the value is stored in the assembly metadata (IL constant table),
+        // not in runtime memory like static fields. Reading const values requires parsing
+        // the assembly's metadata tables, which is complex.
+        //
+        // Const values are compile-time constants embedded in the DLL - they don't exist
+        // as runtime memory locations that can be read directly.
+        if field.type_info.is_const {
+            let type_name = match field.type_info.clone().code() {
+                TypeCode::I4 => "System.Int32",
+                TypeCode::U4 => "System.UInt32",
+                TypeCode::I8 => "System.Int64",
+                TypeCode::U8 => "System.UInt64",
+                TypeCode::BOOLEAN => "System.Boolean",
+                TypeCode::STRING => "System.String",
+                _ => "unknown"
+            };
+
+            return Ok(serde_json::json!({
+                "type": "const",
+                "value_type": type_name,
+                "is_const": true,
+                "field_addr": format!("0x{:x}", *field_addr),
+                "message": "Const values are stored in assembly metadata, not runtime memory. Use dnSpy or similar tools to read const values from the DLL."
+            }));
+        }
+
+        // Use the fixed get_static_value method for non-const static fields
         let (field_location, _) = typedef.get_static_value(&field.name);
 
         if field_location == 0 {
@@ -652,6 +738,50 @@ fn read_dict_entries(reader: &MonoReader, entries_ptr: usize, count: i32) -> Res
     })
 }
 
+// Debug probe endpoint - dump memory at address
+async fn debug_probe(
+    Path(address_str): Path<String>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    debug_probe_size(Path((address_str, "64".to_string()))).await
+}
+
+async fn debug_probe_size(
+    Path((address_str, size_str)): Path<(String, String)>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let result = with_reader(|reader| -> Result<serde_json::Value, StatusCode> {
+        let address = if address_str.starts_with("0x") {
+            usize::from_str_radix(&address_str[2..], 16)
+        } else {
+            address_str.parse::<usize>()
+        }
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+
+        let size: usize = size_str.parse().unwrap_or(64);
+        let size = size.min(256); // Max 256 bytes
+
+        let mut data = Vec::new();
+        for i in (0..size).step_by(8) {
+            let ptr_val = reader.read_ptr(address + i);
+            let u32_val = reader.read_u32(address + i);
+            let i32_val = reader.read_i32(address + i);
+            data.push(serde_json::json!({
+                "offset": format!("0x{:02x}", i),
+                "ptr": format!("0x{:016x}", ptr_val),
+                "u32": u32_val,
+                "i32": i32_val,
+            }));
+        }
+
+        Ok(serde_json::json!({
+            "address": format!("0x{:x}", address),
+            "size": size,
+            "data": data
+        }))
+    })?;
+
+    Ok(Json(result))
+}
+
 #[tokio::main]
 async fn main() {
     println!("Starting MTGA Reader HTTP Server...");
@@ -704,6 +834,8 @@ async fn main() {
         .route("/instance/:address/field/:field_name", get(read_instance_field))
         .route("/class/:address/field/:field_name", get(read_static_field))
         .route("/dictionary/:address", get(read_dictionary))
+        .route("/debug/probe/:address", get(debug_probe))
+        .route("/debug/probe/:address/:size", get(debug_probe_size))
         .layer(cors);
 
     // Start server

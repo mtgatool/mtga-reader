@@ -211,6 +211,18 @@ impl MemoryReader for MonoBackend {
         unsafe { member.read().unwrap_or(0) }
     }
 
+    fn read_f32(&self, addr: usize) -> f32 {
+        let mut member = DataMember::<f32>::new(self.handle);
+        member.set_offset(vec![addr]);
+        unsafe { member.read().unwrap_or(0.0) }
+    }
+
+    fn read_f64(&self, addr: usize) -> f64 {
+        let mut member = DataMember::<f64>::new(self.handle);
+        member.set_offset(vec![addr]);
+        unsafe { member.read().unwrap_or(0.0) }
+    }
+
     fn read_ptr(&self, addr: usize) -> usize {
         let mut member = DataMember::<usize>::new(self.handle);
         member.set_offset(vec![addr]);
