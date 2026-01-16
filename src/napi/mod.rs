@@ -1,3 +1,9 @@
+//! NAPI bindings for Node.js
+//!
+//! This module provides cross-platform Node.js bindings for reading MTGA memory.
+//! - Windows: Uses Mono backend
+//! - macOS: Uses IL2CPP backend
+
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use serde::{Deserialize, Serialize};
@@ -81,20 +87,19 @@ pub struct DictionaryData {
 }
 
 // ============================================================================
-// Platform-specific backend implementations
+// Windows Backend (Mono)
 // ============================================================================
 
 #[cfg(target_os = "windows")]
 mod windows_backend {
     use super::*;
-    use mtga_reader::{
+    use crate::{
         field_definition::FieldDefinition,
         mono_reader::MonoReader,
         type_code::TypeCode,
         type_definition::TypeDefinition,
     };
 
-    // Wrapper to make MonoReader Send + Sync
     pub struct ReaderWrapper(pub Option<MonoReader>);
     unsafe impl Send for ReaderWrapper {}
     unsafe impl Sync for ReaderWrapper {}
@@ -368,7 +373,7 @@ mod windows_backend {
 
     fn read_dict_entries(reader: &MonoReader, entries_ptr: usize, count: i32) -> Result<DictionaryData> {
         let entry_size = 16usize;
-        let entries_start = entries_ptr + mtga_reader::constants::SIZE_OF_PTR * 4;
+        let entries_start = entries_ptr + crate::constants::SIZE_OF_PTR * 4;
 
         let mut entries = Vec::new();
         let max_read = std::cmp::min(count, 5000);
@@ -523,10 +528,22 @@ mod windows_backend {
             }
         }
     }
+
+    pub fn read_data_impl(process_name: &str, fields: Vec<String>) -> serde_json::Value {
+        crate::read_data(process_name.to_string(), fields)
+    }
+
+    pub fn read_class_impl(process_name: &str, address: i64) -> serde_json::Value {
+        crate::read_class(process_name.to_string(), address)
+    }
+
+    pub fn read_generic_instance_impl(process_name: &str, address: i64) -> serde_json::Value {
+        crate::read_generic_instance(process_name.to_string(), address)
+    }
 }
 
 // ============================================================================
-// macOS IL2CPP Backend
+// macOS Backend (IL2CPP)
 // ============================================================================
 
 #[cfg(target_os = "macos")]
@@ -534,7 +551,6 @@ mod macos_backend {
     use super::*;
     use std::process::Command;
 
-    // IL2CPP offsets for MTGA on macOS
     mod offsets {
         pub const CLASS_NAME: usize = 0x10;
         pub const CLASS_NAMESPACE: usize = 0x18;
@@ -547,7 +563,6 @@ mod macos_backend {
         pub const TYPE_INFO_TABLE_OFFSET: usize = 0x24360;
     }
 
-    // Memory reader using mach2
     pub struct MemReader {
         task_port: u32,
     }
@@ -597,16 +612,6 @@ mod macos_backend {
             bytes.first().copied().unwrap_or(0)
         }
 
-        pub fn read_i64(&self, addr: usize) -> i64 {
-            let bytes = self.read_bytes(addr, 8);
-            i64::from_le_bytes(bytes.try_into().unwrap_or([0; 8]))
-        }
-
-        pub fn read_u64(&self, addr: usize) -> u64 {
-            let bytes = self.read_bytes(addr, 8);
-            u64::from_le_bytes(bytes.try_into().unwrap_or([0; 8]))
-        }
-
         pub fn read_string(&self, addr: usize) -> String {
             if addr == 0 {
                 return String::new();
@@ -617,7 +622,6 @@ mod macos_backend {
         }
     }
 
-    // IL2CPP State
     pub struct Il2CppState {
         pub reader: MemReader,
         pub pid: u32,
@@ -731,7 +735,6 @@ mod macos_backend {
     }
 
     pub fn is_admin_impl() -> bool {
-        // On macOS, we need to run with sudo
         unsafe { libc::geteuid() == 0 }
     }
 
@@ -758,7 +761,6 @@ mod macos_backend {
 
         let reader = MemReader::new(pid);
 
-        // Find data segment and type info table
         let data_base = find_second_data_segment(pid);
         if data_base == 0 {
             return Err(Error::from_reason("Could not find GameAssembly __DATA segment"));
@@ -769,11 +771,9 @@ mod macos_backend {
             return Err(Error::from_reason("Could not find type info table"));
         }
 
-        // Find PAPA class
         let papa_class = find_class_by_name(&reader, type_info_table, "PAPA")
             .ok_or_else(|| Error::from_reason("PAPA class not found"))?;
 
-        // Find PAPA instance
         let papa_instance = find_papa_instance(&reader, papa_class).unwrap_or(0);
 
         let mut wrapper = STATE.lock().map_err(|_| Error::from_reason("Failed to lock state"))?;
@@ -814,7 +814,6 @@ mod macos_backend {
     }
 
     pub fn get_assemblies_impl() -> Result<Vec<String>> {
-        // IL2CPP doesn't have assemblies like Mono - return fake list for compatibility
         Ok(vec![
             "GameAssembly".to_string(),
             "MTGA-Classes".to_string(),
@@ -873,7 +872,6 @@ mod macos_backend {
             let type_attrs = reader.read_u32(type_ptr + offsets::TYPE_ATTRS);
             let is_static = (type_attrs & 0x10) != 0;
 
-            // Try to get type name from type data
             let type_data = reader.read_ptr(type_ptr);
             let type_name = if type_data > 0x100000 {
                 let tn = read_class_name(reader, type_data);
@@ -903,10 +901,8 @@ mod macos_backend {
             let namespace = read_class_namespace(&state.reader, class_addr);
             let fields = get_class_fields(&state.reader, class_addr);
 
-            // Find static instances
             let mut static_instances = Vec::new();
 
-            // Special handling for PAPA - we have a known instance
             if class_name == "PAPA" && state.papa_instance != 0 {
                 static_instances.push(StaticInstanceInfo {
                     field_name: "_instance".to_string(),
@@ -914,7 +910,6 @@ mod macos_backend {
                 });
             }
 
-            // Check static fields for instance patterns
             for field in &fields {
                 if field.is_static && (field.name.contains("instance") || field.name.contains("Instance")) {
                     let static_fields = state.reader.read_ptr(class_addr + offsets::CLASS_STATIC_FIELDS);
@@ -943,7 +938,6 @@ mod macos_backend {
     fn read_field_value(reader: &MemReader, instance_addr: usize, field: &FieldInfo) -> serde_json::Value {
         let field_addr = instance_addr + field.offset as usize;
 
-        // For small offsets, might be a primitive
         if field.type_name.contains("Int32") || field.type_name.contains("int") {
             return serde_json::json!(reader.read_i32(field_addr));
         }
@@ -951,13 +945,11 @@ mod macos_backend {
             return serde_json::json!(reader.read_u8(field_addr) != 0);
         }
 
-        // Try reading as pointer
         let ptr = reader.read_ptr(field_addr);
         if ptr == 0 {
             return serde_json::Value::Null;
         }
 
-        // Check if it's a valid object pointer
         if ptr > 0x100000 && ptr < 0x400000000 {
             let class_ptr = reader.read_ptr(ptr);
             let class_name = read_class_name(reader, class_ptr);
@@ -969,7 +961,6 @@ mod macos_backend {
             });
         }
 
-        // Might be a small integer stored directly
         serde_json::json!(reader.read_i32(field_addr))
     }
 
@@ -1094,17 +1085,6 @@ mod macos_backend {
         })
     }
 
-    fn read_cards_and_quantity(reader: &MemReader, cards_addr: usize) -> Result<DictionaryData> {
-        let entries_ptr = reader.read_ptr(cards_addr + 0x18);
-        let count = reader.read_i32(cards_addr + 0x20);
-
-        if entries_ptr == 0 || count <= 0 || count > 100000 {
-            return Err(Error::from_reason("Invalid CardsAndQuantity structure"));
-        }
-
-        read_dict_entries_il2cpp(reader, entries_ptr, count)
-    }
-
     fn read_dict_entries_il2cpp(reader: &MemReader, entries_ptr: usize, count: i32) -> Result<DictionaryData> {
         let mut entries = Vec::new();
         let max_read = count.min(5000) as usize;
@@ -1136,244 +1116,48 @@ mod macos_backend {
                 return Err(Error::from_reason("Invalid address"));
             }
 
-            // Check class name to determine how to read
             let class_ptr = state.reader.read_ptr(dict_addr);
             let class_name = read_class_name(&state.reader, class_ptr);
 
-            // For CardsAndQuantity
             if class_name == "CardsAndQuantity" {
-                return read_cards_and_quantity(&state.reader, dict_addr);
+                let entries_ptr = state.reader.read_ptr(dict_addr + 0x18);
+                let count = state.reader.read_i32(dict_addr + 0x20);
+
+                if entries_ptr > 0x100000 && count > 0 && count < 100000 {
+                    return read_dict_entries_il2cpp(&state.reader, entries_ptr, count);
+                }
             }
 
-            // Try standard Dictionary layouts
             let entries_ptr = state.reader.read_ptr(dict_addr + 0x18);
             let count = state.reader.read_i32(dict_addr + 0x20);
 
             if entries_ptr > 0x100000 && count > 0 && count < 100000 {
-                let arr_len = state.reader.read_u32(entries_ptr + 0x18);
-                if arr_len > 0 {
-                    return read_dict_entries_il2cpp(&state.reader, entries_ptr, count);
-                }
-            }
-
-            // Try alternative offset
-            let entries_ptr = state.reader.read_ptr(dict_addr + 0x10);
-            if entries_ptr > 0x100000 {
-                let arr_len = state.reader.read_u32(entries_ptr + 0x18);
-                if arr_len > 0 && arr_len < 200000 {
-                    let count = arr_len as i32;
-                    return read_dict_entries_il2cpp(&state.reader, entries_ptr, count);
-                }
+                return read_dict_entries_il2cpp(&state.reader, entries_ptr, count);
             }
 
             Err(Error::from_reason("Could not read dictionary"))
         })
     }
-}
 
-// ============================================================================
-// Public API - delegates to platform-specific implementations
-// ============================================================================
-
-/// Check if the current process has administrator privileges
-#[napi]
-pub fn is_admin() -> bool {
-    #[cfg(target_os = "windows")]
-    { windows_backend::is_admin_impl() }
-
-    #[cfg(target_os = "macos")]
-    { macos_backend::is_admin_impl() }
-
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    { false }
-}
-
-/// Find a process by name and return true if found
-#[napi]
-pub fn find_process(process_name: String) -> bool {
-    #[cfg(target_os = "windows")]
-    { windows_backend::find_process_impl(&process_name) }
-
-    #[cfg(target_os = "macos")]
-    { macos_backend::find_process_impl(&process_name) }
-
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    { false }
-}
-
-/// Initialize connection to the target process
-/// Must be called before using any other reader functions
-#[napi]
-pub fn init(process_name: String) -> Result<bool> {
-    #[cfg(target_os = "windows")]
-    { windows_backend::init_impl(&process_name) }
-
-    #[cfg(target_os = "macos")]
-    { macos_backend::init_impl(&process_name) }
-
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    { Err(Error::from_reason("Platform not supported")) }
-}
-
-/// Close the connection to the target process
-#[napi]
-pub fn close() -> Result<bool> {
-    #[cfg(target_os = "windows")]
-    { windows_backend::close_impl() }
-
-    #[cfg(target_os = "macos")]
-    { macos_backend::close_impl() }
-
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    { Ok(true) }
-}
-
-/// Check if the reader is initialized
-#[napi]
-pub fn is_initialized() -> bool {
-    #[cfg(target_os = "windows")]
-    { windows_backend::is_initialized_impl() }
-
-    #[cfg(target_os = "macos")]
-    { macos_backend::is_initialized_impl() }
-
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    { false }
-}
-
-/// Get all loaded assembly names
-#[napi]
-pub fn get_assemblies() -> Result<Vec<String>> {
-    #[cfg(target_os = "windows")]
-    { windows_backend::get_assemblies_impl() }
-
-    #[cfg(target_os = "macos")]
-    { macos_backend::get_assemblies_impl() }
-
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    { Err(Error::from_reason("Platform not supported")) }
-}
-
-/// Get all classes in an assembly
-#[napi]
-pub fn get_assembly_classes(assembly_name: String) -> Result<Vec<ClassInfo>> {
-    #[cfg(target_os = "windows")]
-    { windows_backend::get_assembly_classes_impl(&assembly_name) }
-
-    #[cfg(target_os = "macos")]
-    { macos_backend::get_assembly_classes_impl(&assembly_name) }
-
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    { Err(Error::from_reason("Platform not supported")) }
-}
-
-/// Get detailed information about a class
-#[napi]
-pub fn get_class_details(assembly_name: String, class_name: String) -> Result<ClassDetails> {
-    #[cfg(target_os = "windows")]
-    { windows_backend::get_class_details_impl(&assembly_name, &class_name) }
-
-    #[cfg(target_os = "macos")]
-    { macos_backend::get_class_details_impl(&assembly_name, &class_name) }
-
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    { Err(Error::from_reason("Platform not supported")) }
-}
-
-/// Read an instance at a given memory address
-#[napi]
-pub fn get_instance(address: i64) -> Result<InstanceData> {
-    #[cfg(target_os = "windows")]
-    { windows_backend::get_instance_impl(address) }
-
-    #[cfg(target_os = "macos")]
-    { macos_backend::get_instance_impl(address) }
-
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    { Err(Error::from_reason("Platform not supported")) }
-}
-
-/// Read a specific field from an instance
-#[napi]
-pub fn get_instance_field(address: i64, field_name: String) -> Result<serde_json::Value> {
-    #[cfg(target_os = "windows")]
-    { windows_backend::get_instance_field_impl(address, &field_name) }
-
-    #[cfg(target_os = "macos")]
-    { macos_backend::get_instance_field_impl(address, &field_name) }
-
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    { Err(Error::from_reason("Platform not supported")) }
-}
-
-/// Read a static field from a class
-#[napi]
-pub fn get_static_field(class_address: i64, field_name: String) -> Result<serde_json::Value> {
-    #[cfg(target_os = "windows")]
-    { windows_backend::get_static_field_impl(class_address, &field_name) }
-
-    #[cfg(target_os = "macos")]
-    { macos_backend::get_static_field_impl(class_address, &field_name) }
-
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    { Err(Error::from_reason("Platform not supported")) }
-}
-
-/// Read a dictionary at a given memory address
-#[napi]
-pub fn get_dictionary(address: i64) -> Result<DictionaryData> {
-    #[cfg(target_os = "windows")]
-    { windows_backend::get_dictionary_impl(address) }
-
-    #[cfg(target_os = "macos")]
-    { macos_backend::get_dictionary_impl(address) }
-
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    { Err(Error::from_reason("Platform not supported")) }
-}
-
-// ============================================================================
-// High-level data reading functions
-// These use the main mtga-reader library for Windows (Mono)
-// For macOS (IL2CPP), we provide simplified implementations
-// ============================================================================
-
-/// Read nested data by traversing a path of field names
-/// The first element is the root class name, subsequent elements are field names
-#[napi]
-pub fn read_data(process_name: String, fields: Vec<String>) -> serde_json::Value {
-    #[cfg(target_os = "windows")]
-    {
-        mtga_reader::read_data(process_name, fields)
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        // For macOS IL2CPP, we need a simplified implementation
-        // that navigates through the known PAPA path
-        use macos_backend::*;
-
+    pub fn read_data_impl(process_name: &str, fields: Vec<String>) -> serde_json::Value {
         let result = (|| -> Result<serde_json::Value> {
             if fields.is_empty() {
                 return Err(Error::from_reason("No path specified"));
             }
 
-            // Initialize if needed
             if !is_initialized_impl() {
-                init_impl(&process_name)?;
+                init_impl(process_name)?;
             }
 
             let wrapper = STATE.lock().map_err(|_| Error::from_reason("Failed to lock state"))?;
             let state = wrapper.0.as_ref()
                 .ok_or_else(|| Error::from_reason("Reader not initialized"))?;
 
-            // Start from PAPA or WrapperController
             let root_name = &fields[0];
             if root_name != "PAPA" && root_name != "WrapperController" {
                 return Err(Error::from_reason(format!("Root class '{}' not supported on macOS IL2CPP. Use 'PAPA' or 'WrapperController'.", root_name)));
             }
 
-            // Navigate from PAPA instance
             if state.papa_instance == 0 {
                 return Err(Error::from_reason("PAPA instance not found"));
             }
@@ -1381,7 +1165,6 @@ pub fn read_data(process_name: String, fields: Vec<String>) -> serde_json::Value
             let mut current_addr = state.papa_instance;
             let mut current_class = state.reader.read_ptr(current_addr);
 
-            // Skip the root class name, navigate through field path
             for field_name in &fields[1..] {
                 let fields_list = get_class_fields(&state.reader, current_class);
 
@@ -1400,10 +1183,8 @@ pub fn read_data(process_name: String, fields: Vec<String>) -> serde_json::Value
                 current_class = state.reader.read_ptr(current_addr);
             }
 
-            // Return the final object's data
             let class_name = read_class_name(&state.reader, current_class);
 
-            // If it's a dictionary-like structure, return its entries
             if class_name == "CardsAndQuantity" || class_name.contains("Dictionary") {
                 let entries_ptr = state.reader.read_ptr(current_addr + 0x18);
                 let count = state.reader.read_i32(current_addr + 0x20);
@@ -1427,7 +1208,6 @@ pub fn read_data(process_name: String, fields: Vec<String>) -> serde_json::Value
                 }
             }
 
-            // Return basic object info
             Ok(serde_json::json!({
                 "address": current_addr,
                 "class": class_name
@@ -1437,54 +1217,201 @@ pub fn read_data(process_name: String, fields: Vec<String>) -> serde_json::Value
         result.unwrap_or_else(|e| serde_json::json!({ "error": e.to_string() }))
     }
 
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    {
-        serde_json::json!({ "error": "Platform not supported" })
+    pub fn read_class_impl(_process_name: &str, address: i64) -> serde_json::Value {
+        match get_instance_impl(address) {
+            Ok(data) => serde_json::to_value(data).unwrap_or(serde_json::json!({"error": "Serialization failed"})),
+            Err(e) => serde_json::json!({ "error": e.to_string() })
+        }
+    }
+
+    pub fn read_generic_instance_impl(_process_name: &str, address: i64) -> serde_json::Value {
+        match get_instance_impl(address) {
+            Ok(data) => serde_json::to_value(data).unwrap_or(serde_json::json!({"error": "Serialization failed"})),
+            Err(e) => serde_json::json!({ "error": e.to_string() })
+        }
     }
 }
 
-/// Read a managed class at a given address
+// ============================================================================
+// Public NAPI API
+// ============================================================================
+
+#[napi]
+pub fn is_admin() -> bool {
+    #[cfg(target_os = "windows")]
+    { windows_backend::is_admin_impl() }
+
+    #[cfg(target_os = "macos")]
+    { macos_backend::is_admin_impl() }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    { false }
+}
+
+#[napi]
+pub fn find_process(process_name: String) -> bool {
+    #[cfg(target_os = "windows")]
+    { windows_backend::find_process_impl(&process_name) }
+
+    #[cfg(target_os = "macos")]
+    { macos_backend::find_process_impl(&process_name) }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    { false }
+}
+
+#[napi]
+pub fn init(process_name: String) -> Result<bool> {
+    #[cfg(target_os = "windows")]
+    { windows_backend::init_impl(&process_name) }
+
+    #[cfg(target_os = "macos")]
+    { macos_backend::init_impl(&process_name) }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    { Err(Error::from_reason("Platform not supported")) }
+}
+
+#[napi]
+pub fn close() -> Result<bool> {
+    #[cfg(target_os = "windows")]
+    { windows_backend::close_impl() }
+
+    #[cfg(target_os = "macos")]
+    { macos_backend::close_impl() }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    { Ok(true) }
+}
+
+#[napi]
+pub fn is_initialized() -> bool {
+    #[cfg(target_os = "windows")]
+    { windows_backend::is_initialized_impl() }
+
+    #[cfg(target_os = "macos")]
+    { macos_backend::is_initialized_impl() }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    { false }
+}
+
+#[napi]
+pub fn get_assemblies() -> Result<Vec<String>> {
+    #[cfg(target_os = "windows")]
+    { windows_backend::get_assemblies_impl() }
+
+    #[cfg(target_os = "macos")]
+    { macos_backend::get_assemblies_impl() }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    { Err(Error::from_reason("Platform not supported")) }
+}
+
+#[napi]
+pub fn get_assembly_classes(assembly_name: String) -> Result<Vec<ClassInfo>> {
+    #[cfg(target_os = "windows")]
+    { windows_backend::get_assembly_classes_impl(&assembly_name) }
+
+    #[cfg(target_os = "macos")]
+    { macos_backend::get_assembly_classes_impl(&assembly_name) }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    { Err(Error::from_reason("Platform not supported")) }
+}
+
+#[napi]
+pub fn get_class_details(assembly_name: String, class_name: String) -> Result<ClassDetails> {
+    #[cfg(target_os = "windows")]
+    { windows_backend::get_class_details_impl(&assembly_name, &class_name) }
+
+    #[cfg(target_os = "macos")]
+    { macos_backend::get_class_details_impl(&assembly_name, &class_name) }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    { Err(Error::from_reason("Platform not supported")) }
+}
+
+#[napi]
+pub fn get_instance(address: i64) -> Result<InstanceData> {
+    #[cfg(target_os = "windows")]
+    { windows_backend::get_instance_impl(address) }
+
+    #[cfg(target_os = "macos")]
+    { macos_backend::get_instance_impl(address) }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    { Err(Error::from_reason("Platform not supported")) }
+}
+
+#[napi]
+pub fn get_instance_field(address: i64, field_name: String) -> Result<serde_json::Value> {
+    #[cfg(target_os = "windows")]
+    { windows_backend::get_instance_field_impl(address, &field_name) }
+
+    #[cfg(target_os = "macos")]
+    { macos_backend::get_instance_field_impl(address, &field_name) }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    { Err(Error::from_reason("Platform not supported")) }
+}
+
+#[napi]
+pub fn get_static_field(class_address: i64, field_name: String) -> Result<serde_json::Value> {
+    #[cfg(target_os = "windows")]
+    { windows_backend::get_static_field_impl(class_address, &field_name) }
+
+    #[cfg(target_os = "macos")]
+    { macos_backend::get_static_field_impl(class_address, &field_name) }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    { Err(Error::from_reason("Platform not supported")) }
+}
+
+#[napi]
+pub fn get_dictionary(address: i64) -> Result<DictionaryData> {
+    #[cfg(target_os = "windows")]
+    { windows_backend::get_dictionary_impl(address) }
+
+    #[cfg(target_os = "macos")]
+    { macos_backend::get_dictionary_impl(address) }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    { Err(Error::from_reason("Platform not supported")) }
+}
+
+#[napi]
+pub fn read_data(process_name: String, fields: Vec<String>) -> serde_json::Value {
+    #[cfg(target_os = "windows")]
+    { windows_backend::read_data_impl(&process_name, fields) }
+
+    #[cfg(target_os = "macos")]
+    { macos_backend::read_data_impl(&process_name, fields) }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    { serde_json::json!({ "error": "Platform not supported" }) }
+}
+
 #[napi]
 pub fn read_class(process_name: String, address: i64) -> serde_json::Value {
     #[cfg(target_os = "windows")]
-    {
-        mtga_reader::read_class(process_name, address)
-    }
+    { windows_backend::read_class_impl(&process_name, address) }
 
     #[cfg(target_os = "macos")]
-    {
-        // For macOS, just use get_instance
-        match get_instance(address) {
-            Ok(data) => serde_json::to_value(data).unwrap_or(serde_json::json!({"error": "Serialization failed"})),
-            Err(e) => serde_json::json!({ "error": e.to_string() })
-        }
-    }
+    { macos_backend::read_class_impl(&process_name, address) }
 
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    {
-        serde_json::json!({ "error": "Platform not supported" })
-    }
+    { serde_json::json!({ "error": "Platform not supported" }) }
 }
 
-/// Read a generic instance at a given address
 #[napi]
 pub fn read_generic_instance(process_name: String, address: i64) -> serde_json::Value {
     #[cfg(target_os = "windows")]
-    {
-        mtga_reader::read_generic_instance(process_name, address)
-    }
+    { windows_backend::read_generic_instance_impl(&process_name, address) }
 
     #[cfg(target_os = "macos")]
-    {
-        // For macOS, just use get_instance
-        match get_instance(address) {
-            Ok(data) => serde_json::to_value(data).unwrap_or(serde_json::json!({"error": "Serialization failed"})),
-            Err(e) => serde_json::json!({ "error": e.to_string() })
-        }
-    }
+    { macos_backend::read_generic_instance_impl(&process_name, address) }
 
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    {
-        serde_json::json!({ "error": "Platform not supported" })
-    }
+    { serde_json::json!({ "error": "Platform not supported" }) }
 }

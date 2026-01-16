@@ -475,6 +475,7 @@ version = "0.0.0"
 dependencies = [
  "axum",
  "is_elevated",
+ "libc",
  "libproc",
  "mach2",
  "napi",

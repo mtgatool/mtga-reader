@@ -1,4 +1,6 @@
-/* Auto-generated TypeScript definitions for mtga-reader-node */
+/**
+ * mtga-reader - Node.js bindings for reading Magic: The Gathering Arena memory
+ */
 
 export interface ClassInfo {
   name: string;
@@ -33,7 +35,7 @@ export interface InstanceField {
   name: string;
   typeName: string;
   isStatic: boolean;
-  value: any;
+  value: unknown;
 }
 
 export interface InstanceData {
@@ -44,8 +46,8 @@ export interface InstanceData {
 }
 
 export interface DictionaryEntry {
-  key: any;
-  value: any;
+  key: unknown;
+  value: unknown;
 }
 
 export interface DictionaryData {
@@ -53,26 +55,24 @@ export interface DictionaryData {
   entries: DictionaryEntry[];
 }
 
-// Utility functions
-
 /**
- * Check if the current process has administrator privileges
+ * Check if running with admin/root privileges
  */
 export function isAdmin(): boolean;
 
 /**
- * Find a process by name and return true if found
+ * Check if a process with the given name is running
  */
 export function findProcess(processName: string): boolean;
 
 /**
- * Initialize connection to the target process
- * Must be called before using any other reader functions
+ * Initialize the reader for a given process
+ * @throws Error if process not found or initialization fails
  */
 export function init(processName: string): boolean;
 
 /**
- * Close the connection to the target process
+ * Close the reader and release resources
  */
 export function close(): boolean;
 
@@ -81,61 +81,54 @@ export function close(): boolean;
  */
 export function isInitialized(): boolean;
 
-// Assembly functions
-
 /**
- * Get all loaded assembly names
+ * Get list of loaded assemblies
  */
 export function getAssemblies(): string[];
 
 /**
- * Get all classes in an assembly
+ * Get classes in an assembly
  */
 export function getAssemblyClasses(assemblyName: string): ClassInfo[];
 
 /**
- * Get detailed information about a class
+ * Get detailed class information including fields
  */
 export function getClassDetails(assemblyName: string, className: string): ClassDetails;
 
-// Instance reading functions
-
 /**
- * Read an instance at a given memory address
+ * Get instance data at a memory address
  */
 export function getInstance(address: number): InstanceData;
 
 /**
- * Read a specific field from an instance
+ * Get a specific field from an instance
  */
-export function getInstanceField(address: number, fieldName: string): any;
+export function getInstanceField(address: number, fieldName: string): unknown;
 
 /**
- * Read a static field from a class
+ * Get a static field from a class
  */
-export function getStaticField(classAddress: number, fieldName: string): any;
-
-// Dictionary reading
+export function getStaticField(classAddress: number, fieldName: string): unknown;
 
 /**
- * Read a dictionary at a given memory address
+ * Read a dictionary at a memory address
  */
 export function getDictionary(address: number): DictionaryData;
 
-// High-level data reading
+/**
+ * Legacy API: Read data by following a path of field names
+ * Windows: WrapperController path (WrapperController.Instance.InventoryManager...)
+ * macOS: PAPA path (PAPA._InventoryManager.GetPlayerCardsNoLock...)
+ */
+export function readData(processName: string, fields: string[]): unknown;
 
 /**
- * Read nested data by traversing a path of field names
- * The first element is the root class name, subsequent elements are field names
+ * Legacy API: Read class at address
  */
-export function readData(processName: string, fields: string[]): any;
+export function readClass(processName: string, address: number): unknown;
 
 /**
- * Read a managed class at a given address
+ * Legacy API: Read generic instance at address
  */
-export function readClass(processName: string, address: number): any;
-
-/**
- * Read a generic instance at a given address
- */
-export function readGenericInstance(processName: string, address: number): any;
+export function readGenericInstance(processName: string, address: number): unknown;

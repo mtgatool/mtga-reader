@@ -15,7 +15,10 @@
       "Bash(sudo cargo run:*)",
       "Bash(sudo timeout 10 cargo run:*)",
       "Bash(curl:*)",
-      "Bash(sudo node:*)"
+      "Bash(sudo node:*)",
+      "Bash(npm run build:*)",
+      "Bash(sudo npm test:*)",
+      "Bash(sudo npm run demo:*)"
     ]
   }
 }

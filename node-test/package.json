@@ -1,16 +1,17 @@
 {
-  "name": "mtga-reader-node",
+  "name": "mtga-reader-example",
   "version": "0.1.0",
-  "description": "Node.js native addon for reading MTGA game data",
+  "description": "Example project demonstrating how to use the mtga-reader package",
   "main": "index.js",
-  "types": "index.d.ts",
   "scripts": {
-    "build": "cargo build --release && node scripts/copy-binary.js",
-    "build:debug": "cargo build && node scripts/copy-binary.js debug",
-    "test": "node test.js"
+    "test": "node test.js",
+    "demo": "node demo.js"
   },
   "license": "MIT",
   "engines": {
     "node": ">= 16"
+  },
+  "dependencies": {
+    "mtga-reader": "file:../mtga-reader-js"
   }
 }

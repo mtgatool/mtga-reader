@@ -1,19 +1,22 @@
 /**
- * Test file for mtga-reader-node native addon
+ * Test file for mtga-reader package
  *
  * Prerequisites:
- * 1. Run as Administrator
+ * 1. Run as Administrator (Windows) or with sudo (macOS)
  * 2. MTGA must be running
  *
  * Usage:
- *   npm run build
+ *   npm install
  *   npm test
  */
 
-const mtga = require('./index');
+const mtga = require('mtga-reader');
+
+const isMacOS = process.platform === 'darwin';
 
 console.log('='.repeat(60));
 console.log('MTGA Reader Node.js Test');
+console.log(`Platform: ${process.platform}`);
 console.log('='.repeat(60));
 
 // Check admin privileges
@@ -22,8 +25,9 @@ const isAdmin = mtga.isAdmin();
 console.log(`    Admin: ${isAdmin}`);
 
 if (!isAdmin) {
-    console.error('\n❌ Error: This program requires administrator privileges.');
-    console.error('   Please run as Administrator.');
+    console.error('\n Error: This program requires administrator privileges.');
+    console.error('   Windows: Run as Administrator');
+    console.error('   macOS: Run with sudo');
     process.exit(1);
 }
 
@@ -33,7 +37,7 @@ const processFound = mtga.findProcess('MTGA');
 console.log(`    Process found: ${processFound}`);
 
 if (!processFound) {
-    console.error('\n❌ Error: MTGA process not found.');
+    console.error('\n Error: MTGA process not found.');
     console.error('   Please start MTGA first.');
     process.exit(1);
 }
@@ -44,7 +48,7 @@ try {
     mtga.init('MTGA');
     console.log('    Initialized: true');
 } catch (err) {
-    console.error(`\n❌ Error initializing: ${err.message}`);
+    console.error(`\n Error initializing: ${err.message}`);
     process.exit(1);
 }
 
@@ -61,25 +65,29 @@ try {
     console.error(`    Error: ${err.message}`);
 }
 
-// Get classes from Assembly-CSharp
-console.log('\n[5] Getting classes from Assembly-CSharp...');
+// Get classes from assembly
+console.log('\n[5] Getting classes...');
 try {
-    const classes = mtga.getAssemblyClasses('Assembly-CSharp');
+    const assemblyName = isMacOS ? 'GameAssembly' : 'Assembly-CSharp';
+    const classes = mtga.getAssemblyClasses(assemblyName);
     console.log(`    Found ${classes.length} classes`);
 
-    // Find WrapperController
-    const wrapperController = classes.find(c => c.name === 'WrapperController');
-    if (wrapperController) {
-        console.log(`\n    Found WrapperController at address: 0x${wrapperController.address.toString(16)}`);
+    // Find key classes
+    const targetClass = isMacOS ? 'PAPA' : 'WrapperController';
+    const found = classes.find(c => c.name === targetClass);
+    if (found) {
+        console.log(`\n    Found ${targetClass} at address: 0x${found.address.toString(16)}`);
     }
 } catch (err) {
     console.error(`    Error: ${err.message}`);
 }
 
-// Get class details for WrapperController
-console.log('\n[6] Getting WrapperController details...');
+// Get class details
+console.log('\n[6] Getting class details...');
 try {
-    const details = mtga.getClassDetails('Assembly-CSharp', 'WrapperController');
+    const assemblyName = isMacOS ? 'GameAssembly' : 'Assembly-CSharp';
+    const className = isMacOS ? 'PAPA' : 'WrapperController';
+    const details = mtga.getClassDetails(assemblyName, className);
     console.log(`    Class: ${details.namespace}.${details.name}`);
     console.log(`    Address: 0x${details.address.toString(16)}`);
     console.log(`    Fields: ${details.fields.length}`);
@@ -100,67 +108,49 @@ try {
     console.error(`    Error: ${err.message}`);
 }
 
-// Test high-level read_data function - get dictionary address
-console.log('\n[7] Testing readData (reading card collection path)...');
-let cardsAddress = null;
+// Test high-level read_data function
+console.log('\n[7] Testing readData (reading card collection)...');
 try {
-    const path = [
-        'WrapperController',
-        '<Instance>k__BackingField',
-        '<InventoryManager>k__BackingField',
-        '_inventoryServiceWrapper',
-        '<Cards>k__BackingField',
-    ];
-    const data = mtga.readData('MTGA', path);
-    console.log('    Result type:', typeof data);
-    if (data && data.error) {
-        console.log('    Error:', data.error);
-    } else if (data) {
-        console.log('    Dictionary info:');
-        console.log(`      _count: ${data._count}`);
-        console.log(`      _version: ${data._version}`);
-        // The _entries field contains a pointer to the entries array
-        if (data._entries && data._entries.address) {
-            cardsAddress = data._entries.address;
-            console.log(`      _entries address: 0x${cardsAddress.toString(16)}`);
-        }
-    }
-} catch (err) {
-    console.error(`    Error: ${err.message}`);
-}
+    // Different paths for different platforms
+    // macOS: Uses backing field names from C# auto-properties
+    // Windows: Uses similar pattern but may differ based on Mono reflection
+    const path = isMacOS
+        ? [
+            'PAPA',
+            '<InventoryManager>k__BackingField',
+            '_inventoryServiceWrapper',
+            '<Cards>k__BackingField',
+        ]
+        : [
+            'WrapperController',
+            '<Instance>k__BackingField',
+            '<InventoryManager>k__BackingField',
+            '_inventoryServiceWrapper',
+            '<Cards>k__BackingField',
+        ];
 
-// Test reading the dictionary entries using getDictionary
-console.log('\n[8] Testing readData with _entries (full card path)...');
-try {
-    const path = [
-        'WrapperController',
-        '<Instance>k__BackingField',
-        '<InventoryManager>k__BackingField',
-        '_inventoryServiceWrapper',
-        '<Cards>k__BackingField',
-        '_entries',
-    ];
+    console.log(`    Using path: ${path.join(' -> ')}`);
     const data = mtga.readData('MTGA', path);
-    console.log('    Result type:', typeof data);
+
     if (data && data.error) {
         console.log('    Error:', data.error);
     } else if (Array.isArray(data)) {
         console.log(`    Got ${data.length} card entries`);
         if (data.length > 0) {
-            console.log('    First 3 entries:');
-            data.slice(0, 3).forEach((entry, i) => {
-                console.log(`      [${i}] key: ${entry.key}, value: ${entry.value}`);
+            console.log('    First 5 entries:');
+            data.slice(0, 5).forEach((entry, i) => {
+                console.log(`      [${i}] card ID: ${entry.key}, quantity: ${entry.value}`);
             });
         }
     } else if (data) {
-        console.log('    Data received (truncated):', JSON.stringify(data).slice(0, 300) + '...');
+        console.log('    Data received:', JSON.stringify(data, null, 2).slice(0, 500));
     }
 } catch (err) {
     console.error(`    Error: ${err.message}`);
 }
 
 // Cleanup
-console.log('\n[9] Closing reader...');
+console.log('\n[8] Closing reader...');
 try {
     mtga.close();
     console.log('    Closed: true');

@@ -8,6 +8,10 @@ pub mod mono;
 #[cfg(feature = "il2cpp")]
 pub mod il2cpp;
 
+// NAPI bindings for Node.js (only when napi-bindings feature is enabled)
+#[cfg(feature = "napi-bindings")]
+pub mod napi;
+
 // Legacy modules (kept for backward compatibility)
 pub mod constants;
 pub mod field_definition;
@@ -28,9 +32,8 @@ use type_info::TypeInfo;
 
 use serde_json::json;
 
-use napi_derive::napi;
-
-// Utility fn to get the reader and initialize it
+// Utility fn to get the reader and initialize it (used by Windows backend)
+#[cfg(target_os = "windows")]
 pub fn get_reader(process_name: String) -> Option<MonoReader> {
     let pid = MonoReader::find_pid_by_name(&process_name);
 
@@ -46,6 +49,7 @@ pub fn get_reader(process_name: String) -> Option<MonoReader> {
     return Some(mono_reader);
 }
 
+#[cfg(target_os = "windows")]
 pub fn get_def_by_name<'a>(
     defs: &'a Vec<usize>,
     name: String,
@@ -57,7 +61,7 @@ pub fn get_def_by_name<'a>(
     })
 }
 
-#[napi]
+#[cfg(target_os = "windows")]
 pub fn read_data(process_name: String, fields: Vec<String>) -> serde_json::Value {
     println!("Reading started...");
 
@@ -166,7 +170,7 @@ pub fn read_data(process_name: String, fields: Vec<String>) -> serde_json::Value
     }
 }
 
-#[napi]
+#[cfg(target_os = "windows")]
 pub fn read_class(process_name: String, address: i64) -> serde_json::Value {
     let reader = get_reader(process_name);
 
@@ -196,7 +200,7 @@ pub fn read_class(process_name: String, address: i64) -> serde_json::Value {
     }
 }
 
-#[napi]
+#[cfg(target_os = "windows")]
 pub fn read_generic_instance(process_name: String, address: i64) -> serde_json::Value {
     let reader = get_reader(process_name);
 
@@ -226,155 +230,21 @@ pub fn read_generic_instance(process_name: String, address: i64) -> serde_json::
     }
 }
 
-#[napi]
-pub fn find_pid_by_name(process_name: String) -> bool {
-    let results = MonoReader::find_pid_by_name(&process_name);
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    return match results {
-        Some(_pid) => true,
-        None => false,
-    };
-}
+    #[test]
+    fn test_find_no_process() {
+        let process_name = "_____test";
+        let results = MonoReader::find_pid_by_name(&process_name);
+        assert_eq!(results.is_none(), true);
+    }
 
-#[napi]
-pub fn is_admin() -> bool {
-    let results = MonoReader::is_admin();
-    return results;
-}
-
-#[test]
-fn test_find_no_process() {
-    let process_name = "_____test";
-
-    let results = MonoReader::find_pid_by_name(&process_name);
-
-    assert_eq!(results.is_none(), true);
-}
-
-#[test]
-fn test_find_mtga() {
-    let process_name = "MTGA";
-
-    let results = MonoReader::find_pid_by_name(&process_name);
-
-    assert_eq!(results.is_some(), true);
-}
-
-#[test]
-fn test_read_cards() {
-    let path = vec![
-        "WrapperController".to_string(),
-        "<Instance>k__BackingField".to_string(),
-        "<InventoryManager>k__BackingField".to_string(),
-        "_inventoryServiceWrapper".to_string(),
-        "<Cards>k__BackingField".to_string(),
-        "_entries".to_string(),
-    ];
-
-    let data = read_data("MTGA".to_string(), path);
-    assert_eq!(data.is_array(), true);
-
-    let any_entry = data.get(0).unwrap();
-    assert_eq!(any_entry.is_object(), true);
-    println!("{:?}", any_entry);
-    assert_eq!(any_entry.get("key").unwrap().is_number(), true);
-    assert_eq!(any_entry.get("value").unwrap().is_number(), true);
-}
-
-#[test]
-fn test_read_formats() {
-    let path = vec![
-        "PAPA".to_string(),
-        "_instance".to_string(),
-        "_formatManager".to_string(),
-        "_formats".to_string(),
-        "_items".to_string(),
-    ];
-
-    let data = read_data("MTGA".to_string(), path);
-    println!("{}", data.to_string());
-    assert_eq!(data.is_object(), true);
-}
-
-/*
-pub fn read_managed<T>(type_code: TypeCode) -> Option<T> {
-    match type_code {
-        // 1, b => b[0] != 0
-        TypeCode::BOOLEAN => Some(self.read_ptr_u8(addr) != 0),
-
-        // char -> char
-        TypeCode::CHAR => Some(self.read_ptr_u16(addr)),
-
-        // sizeof(byte), b => b[0]
-        TypeCode::I1 => Some(self.read_ptr_i8(addr)),
-
-        // sizeof(sbyte), b => unchecked((sbyte)b[0])
-        TypeCode::U1 => Some(self.read_ptr_u8(addr)),
-
-        // short size -> int16
-        TypeCode::I2 => Some(self.read_ptr_i16(addr)),
-
-        // ushort size -> uint16
-        TypeCode::U2 => Some(self.read_ptr_u16(addr)),
-
-        // int32
-        TypeCode::I => Some(self.read_i32(addr)),
-        TypeCode::I4 => Some(self.read_i32(addr)),
-
-        // unsigned int32
-        TypeCode::U => Some(self.read_u32(addr)),
-        TypeCode::U4 => Some(self.read_u32(addr)),
-
-        // char size -> int64
-        TypeCode::I8 => Some(self.read_ptr_i64(addr)),
-
-        // char size -> uint64
-        TypeCode::U8 => Some(self.read_ptr_u64(addr)),
-
-        // char size -> single
-        TypeCode::R4 => Some(self.read_ptr_u32(addr)),
-        // char size -> double
-        TypeCode::R8 => Some(self.read_i64(addr)),
-
-        TypeCode::STRING => Some(self.read_ascii_string(addr)),
-
-        // ReadManagedArray
-        TypeCode::SZARRAY => Some(self.read_ptr_ptr(addr)),
-
-        // try ReadManagedStructInstance
-        TypeCode::VALUETYPE => Some(self.read_i32(addr)),
-
-        // ReadManagedClassInstance
-        TypeCode::CLASS => Some(self.read_ptr_ptr(addr)),
-
-        // ReadManagedGenericObject
-        TypeCode::GENERICINST => Some(self.read_ptr_ptr(addr)),
-
-        // ReadManagedGenericObject
-        TypeCode::OBJECT => Some(self.read_ptr_ptr(addr)),
-
-        // ReadManagedVar
-        TypeCode::VAR => Some(self.read_ptr_i32(addr)),
-
-        // Junk
-        TypeCode::END => Some(0),
-        TypeCode::VOID => Some(0),
-        TypeCode::PTR => Some(0),
-        TypeCode::BYREF => Some(0),
-        TypeCode::TYPEDBYREF => Some(0),
-        TypeCode::FNPTR => Some(0),
-        TypeCode::CMOD_REQD => Some(0),
-        TypeCode::CMOD_OPT => Some(0),
-        TypeCode::INTERNAL => Some(0),
-        TypeCode::MODIFIER => Some(0),
-        TypeCode::SENTINEL => Some(0),
-        TypeCode::PINNED => Some(0),
-
-        // May need support
-        TypeCode::ARRAY => Some(0),
-        TypeCode::ENUM => Some(0),
-        TypeCode::MVAR => Some(0),
-        _ => None,
+    #[test]
+    fn test_find_mtga() {
+        let process_name = "MTGA";
+        let results = MonoReader::find_pid_by_name(&process_name);
+        assert_eq!(results.is_some(), true);
     }
 }
-*/

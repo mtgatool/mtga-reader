@@ -12,12 +12,13 @@ path = "src/lib.rs"
 default = ["mono", "il2cpp"]
 mono = []
 il2cpp = []
+napi-bindings = ["napi", "napi-derive"]
 
 [dependencies]
 is_elevated = "0.1.2"
 # Default enable napi4 feature, see https://nodejs.org/api/n-api.html#node-api-version-matrix
-napi = { version = "2.12.2", default-features = false, features = ["napi4", "serde-json"] }
-napi-derive = "2.12.2"
+napi = { version = "2.12.2", default-features = false, features = ["napi4", "serde-json"], optional = true }
+napi-derive = { version = "2.12.2", optional = true }
 process-memory = "0.5.0"
 read-process-memory = "0.1.6"
 serde_json = "1.0.116"
@@ -39,6 +40,7 @@ winapi = { version = "0.3", features = ["psapi", "processthreadsapi", "handleapi
 [target.'cfg(target_os = "macos")'.dependencies]
 mach2 = "0.4"
 libproc = "0.14"
+libc = "0.2"
 
 [build-dependencies]
 napi-build = "2.0.1"
