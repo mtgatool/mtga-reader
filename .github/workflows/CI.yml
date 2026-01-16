@@ -35,12 +35,12 @@ jobs:
             target: x86_64-unknown-linux-gnu
             docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian
             build: yarn build --target x86_64-unknown-linux-gnu --cargo-flags="--lib"
-          # macOS x64 (Intel)
-          - host: macos-13
+          # macOS x64 (Intel) - cross-compile from ARM64
+          - host: macos-14
             target: x86_64-apple-darwin
             build: yarn build --target x86_64-apple-darwin --cargo-flags="--lib"
           # macOS ARM64 (Apple Silicon)
-          - host: macos-latest
+          - host: macos-14
             target: aarch64-apple-darwin
             build: yarn build --target aarch64-apple-darwin --cargo-flags="--lib"
 
@@ -155,44 +155,15 @@ jobs:
       - name: Test bindings
         run: docker run --rm -v $(pwd):/build -w /build node:${{ matrix.node }}-slim yarn test
 
-  # Test on macOS Intel
-  test-macos-x64:
-    name: Test - macOS x64 - node@${{ matrix.node }}
-    needs: build
-    strategy:
-      fail-fast: false
-      matrix:
-        node: ['18', '20']
-    runs-on: macos-13
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup node
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ matrix.node }}
-          cache: yarn
-      - name: Install dependencies
-        run: yarn install
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: bindings-x86_64-apple-darwin
-          path: .
-      - name: List packages
-        run: ls -R .
-        shell: bash
-      - name: Test bindings
-        run: yarn test
-
-  # Test on macOS ARM64
-  test-macos-arm64:
+  # Test on macOS (ARM64 - covers same code as x86_64)
+  test-macos:
     name: Test - macOS ARM64 - node@${{ matrix.node }}
     needs: build
     strategy:
       fail-fast: false
       matrix:
         node: ['18', '20']
-    runs-on: macos-latest
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
       - name: Setup node
@@ -217,7 +188,7 @@ jobs:
   universal-macos:
     name: Build - macOS Universal
     needs: build
-    runs-on: macos-latest
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
       - name: Setup node
@@ -253,8 +224,7 @@ jobs:
     needs:
       - test-windows
       - test-linux
-      - test-macos-x64
-      - test-macos-arm64
+      - test-macos
       - universal-macos
     steps:
       - uses: actions/checkout@v4
