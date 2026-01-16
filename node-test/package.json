@@ -12,6 +12,6 @@
     "node": ">= 16"
   },
   "dependencies": {
-    "mtga-reader": "file:../mtga-reader-js"
+    "mtga-reader": "file:.."
   }
 }

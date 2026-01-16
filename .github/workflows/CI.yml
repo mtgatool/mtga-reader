@@ -19,35 +19,50 @@ permissions:
       - .editorconfig
       - docs/**
   pull_request: null
+
 jobs:
   build:
     strategy:
       fail-fast: false
       matrix:
         settings:
+          # Windows x64
           - host: windows-latest
-            build: yarn build
             target: x86_64-pc-windows-msvc
+            build: yarn build --target x86_64-pc-windows-msvc --cargo-flags="--lib"
+          # Linux x64
           - host: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian
-            build: yarn build --target x86_64-unknown-linux-gnu
-    name: stable - ${{ matrix.settings.target }} - node@20
+            build: yarn build --target x86_64-unknown-linux-gnu --cargo-flags="--lib"
+          # macOS x64 (Intel)
+          - host: macos-13
+            target: x86_64-apple-darwin
+            build: yarn build --target x86_64-apple-darwin --cargo-flags="--lib"
+          # macOS ARM64 (Apple Silicon)
+          - host: macos-latest
+            target: aarch64-apple-darwin
+            build: yarn build --target aarch64-apple-darwin --cargo-flags="--lib"
+
+    name: Build - ${{ matrix.settings.target }}
     runs-on: ${{ matrix.settings.host }}
     steps:
       - uses: actions/checkout@v4
+
       - name: Setup node
         uses: actions/setup-node@v4
         if: ${{ !matrix.settings.docker }}
         with:
           node-version: 20
           cache: yarn
-      - name: Install
+
+      - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         if: ${{ !matrix.settings.docker }}
         with:
           toolchain: stable
           targets: ${{ matrix.settings.target }}
+
       - name: Cache cargo
         uses: actions/cache@v4
         with:
@@ -58,27 +73,10 @@ jobs:
             .cargo-cache
             target/
           key: ${{ matrix.settings.target }}-cargo-${{ matrix.settings.host }}
-      - uses: goto-bus-stop/setup-zig@v2
-        if: ${{ matrix.settings.target == 'armv7-unknown-linux-gnueabihf' || matrix.settings.target == 'armv7-unknown-linux-musleabihf' }}
-        with:
-          version: 0.11.0
-      - name: Setup toolchain
-        run: ${{ matrix.settings.setup }}
-        if: ${{ matrix.settings.setup }}
-        shell: bash
-      - name: Setup node x86
-        if: matrix.settings.target == 'i686-pc-windows-msvc'
-        run: yarn config set supportedArchitectures.cpu "ia32"
-        shell: bash
+
       - name: Install dependencies
         run: yarn install
-      - name: Setup node x86
-        uses: actions/setup-node@v4
-        if: matrix.settings.target == 'i686-pc-windows-msvc'
-        with:
-          node-version: 20
-          cache: yarn
-          architecture: x86
+
       - name: Build in docker
         uses: addnab/docker-run-action@v3
         if: ${{ matrix.settings.docker }}
@@ -86,30 +84,28 @@ jobs:
           image: ${{ matrix.settings.docker }}
           options: '--user 0:0 -v ${{ github.workspace }}/.cargo-cache/git/db:/usr/local/cargo/git/db -v ${{ github.workspace }}/.cargo/registry/cache:/usr/local/cargo/registry/cache -v ${{ github.workspace }}/.cargo/registry/index:/usr/local/cargo/registry/index -v ${{ github.workspace }}:/build -w /build'
           run: ${{ matrix.settings.build }}
+
       - name: Build
         run: ${{ matrix.settings.build }}
         if: ${{ !matrix.settings.docker }}
         shell: bash
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: bindings-${{ matrix.settings.target }}
           path: ${{ env.APP_NAME }}.*.node
           if-no-files-found: error
-  test-macOS-windows-binding:
-    name: Test bindings on ${{ matrix.settings.target }} - node@${{ matrix.node }}
-    needs:
-      - build
+
+  # Test on Windows
+  test-windows:
+    name: Test - Windows x64 - node@${{ matrix.node }}
+    needs: build
     strategy:
       fail-fast: false
       matrix:
-        settings:
-          - host: windows-latest
-            target: x86_64-pc-windows-msvc
-        node:
-          - '18'
-          - '20'
-    runs-on: ${{ matrix.settings.host }}
+        node: ['18', '20']
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - name: Setup node
@@ -122,23 +118,22 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          name: bindings-${{ matrix.settings.target }}
+          name: bindings-x86_64-pc-windows-msvc
           path: .
       - name: List packages
         run: ls -R .
         shell: bash
       - name: Test bindings
         run: yarn test
-  test-linux-x64-gnu-binding:
-    name: Test bindings on Linux-x64-gnu - node@${{ matrix.node }}
-    needs:
-      - build
+
+  # Test on Linux
+  test-linux:
+    name: Test - Linux x64 - node@${{ matrix.node }}
+    needs: build
     strategy:
       fail-fast: false
       matrix:
-        node:
-          - '18'
-          - '20'
+        node: ['18', '20']
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -159,12 +154,70 @@ jobs:
         shell: bash
       - name: Test bindings
         run: docker run --rm -v $(pwd):/build -w /build node:${{ matrix.node }}-slim yarn test
-  publish:
-    name: Publish
-    runs-on: ubuntu-latest
-    needs:
-      - test-macOS-windows-binding
-      - test-linux-x64-gnu-binding
+
+  # Test on macOS Intel
+  test-macos-x64:
+    name: Test - macOS x64 - node@${{ matrix.node }}
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['18', '20']
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: yarn
+      - name: Install dependencies
+        run: yarn install
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: bindings-x86_64-apple-darwin
+          path: .
+      - name: List packages
+        run: ls -R .
+        shell: bash
+      - name: Test bindings
+        run: yarn test
+
+  # Test on macOS ARM64
+  test-macos-arm64:
+    name: Test - macOS ARM64 - node@${{ matrix.node }}
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['18', '20']
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: yarn
+      - name: Install dependencies
+        run: yarn install
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: bindings-aarch64-apple-darwin
+          path: .
+      - name: List packages
+        run: ls -R .
+        shell: bash
+      - name: Test bindings
+        run: yarn test
+
+  # Build universal macOS binary (Intel + ARM)
+  universal-macos:
+    name: Build - macOS Universal
+    needs: build
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - name: Setup node
@@ -174,16 +227,79 @@ jobs:
           cache: yarn
       - name: Install dependencies
         run: yarn install
+      - name: Download macOS x64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bindings-x86_64-apple-darwin
+          path: artifacts
+      - name: Download macOS ARM64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bindings-aarch64-apple-darwin
+          path: artifacts
+      - name: Combine binaries into universal
+        run: yarn universal
+      - name: Upload universal artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-universal-apple-darwin
+          path: ${{ env.APP_NAME }}.*.node
+          if-no-files-found: error
+
+  # Publish to npm
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    needs:
+      - test-windows
+      - test-linux
+      - test-macos-x64
+      - test-macos-arm64
+      - universal-macos
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: yarn
+
+      - name: Install dependencies
+        run: yarn install
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-      - name: Move artifacts
+
+      - name: List downloaded artifacts
+        run: ls -R artifacts
+
+      - name: Move artifacts to npm packages
         run: yarn artifacts
-      - name: List packages
+
+      - name: List npm packages
         run: ls -R ./npm
         shell: bash
-      - name: Publish
+
+      - name: Prepare package for publishing
+        run: |
+          # Generate the main index.js that loads platform-specific binary
+          yarn prepublishOnly
+          echo "Package prepared for publishing"
+          ls -la
+
+      - name: Create tarball for review
+        run: npm pack
+
+      - name: Upload npm package tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-package
+          path: '*.tgz'
+
+      - name: Publish to npm
         run: |
           npm config set provenance true
           if git log -1 --pretty=%B | grep "^[0-9]\+\.[0-9]\+\.[0-9]\+$";
@@ -196,6 +312,7 @@ jobs:
             npm publish --tag next --access public
           else
             echo "Not a release, skipping publish"
+            echo "To publish, create a commit with message like '0.1.6' or '0.1.6-beta.1'"
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

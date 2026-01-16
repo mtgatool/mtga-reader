@@ -1,6 +1,7 @@
 {
   "name": "mtga-reader",
-  "version": "0.1.5",
+  "version": "0.1.6",
+  "description": "Node.js bindings for reading Magic: The Gathering Arena memory (cross-platform)",
   "main": "index.js",
   "types": "index.d.ts",
   "napi": {
@@ -9,7 +10,9 @@
       "defaults": false,
       "additional": [
         "x86_64-pc-windows-msvc",
-        "x86_64-unknown-linux-gnu"
+        "x86_64-unknown-linux-gnu",
+        "x86_64-apple-darwin",
+        "aarch64-apple-darwin"
       ]
     }
   },
@@ -22,6 +25,15 @@
     "name": "Manuel Etchegaray",
     "email": "manuel.etchegaray7@gmail.com"
   },
+  "keywords": [
+    "mtga",
+    "magic",
+    "arena",
+    "memory",
+    "reader",
+    "napi",
+    "native"
+  ],
   "devDependencies": {
     "@napi-rs/cli": "^2.18.2",
     "ava": "^6.0.1"
@@ -30,15 +42,20 @@
     "timeout": "3m"
   },
   "engines": {
-    "node": ">= 10"
+    "node": ">= 16"
   },
   "scripts": {
     "artifacts": "napi artifacts",
-    "build": "napi build --platform --release",
-    "build:debug": "napi build --platform",
+    "build": "napi build --platform --release --features napi-bindings --cargo-flags=\"--lib\"",
+    "build:debug": "napi build --platform --features napi-bindings --cargo-flags=\"--lib\"",
     "prepublishOnly": "napi prepublish -t npm",
     "test": "ava",
     "universal": "napi universal",
     "version": "napi version"
-  }
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "*.node"
+  ]
 }

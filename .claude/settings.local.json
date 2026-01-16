@@ -18,7 +18,10 @@
       "Bash(sudo node:*)",
       "Bash(npm run build:*)",
       "Bash(sudo npm test:*)",
-      "Bash(sudo npm run demo:*)"
+      "Bash(sudo npm run demo:*)",
+      "Bash(yarn install:*)",
+      "Bash(npm install:*)",
+      "Bash(npx napi build:*)"
     ]
   }
 }
