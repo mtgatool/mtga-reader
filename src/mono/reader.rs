@@ -18,6 +18,11 @@ pub struct MonoBackend {
     initialized: bool,
 }
 
+// Safety: ProcessHandle on Windows is a HANDLE which is safe to send between threads.
+// The Windows API guarantees that process handles can be used from any thread.
+unsafe impl Send for MonoBackend {}
+unsafe impl Sync for MonoBackend {}
+
 impl MonoBackend {
     /// Create a new Mono backend for the given process ID
     pub fn new(pid: u32) -> Self {
