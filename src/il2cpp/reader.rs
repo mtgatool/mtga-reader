@@ -43,6 +43,11 @@ impl std::fmt::Debug for Il2CppBackend {
     }
 }
 
+// Safety: ProcessHandle on Windows/Linux is safe to send between threads.
+// On macOS, MacOsMemoryReader uses mach ports which are also thread-safe.
+unsafe impl Send for Il2CppBackend {}
+unsafe impl Sync for Il2CppBackend {}
+
 impl Il2CppBackend {
     /// Create a new IL2CPP backend for the given process ID
     pub fn new(pid: u32) -> Self {
