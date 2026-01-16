@@ -246,6 +246,12 @@ jobs:
       - name: List downloaded artifacts
         run: ls -R artifacts
 
+      - name: Flatten artifacts
+        run: |
+          # Move all .node files from subdirectories to artifacts root
+          find artifacts -name "*.node" -exec mv {} artifacts/ \;
+          ls -la artifacts/
+
       - name: Move artifacts to npm packages
         run: yarn artifacts
 
