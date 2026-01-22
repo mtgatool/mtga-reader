@@ -12,6 +12,9 @@ pub mod il2cpp;
 #[cfg(feature = "napi-bindings")]
 pub mod napi;
 
+// Public Rust API (always available)
+pub mod api;
+
 // Legacy modules (kept for backward compatibility)
 pub mod constants;
 pub mod field_definition;
