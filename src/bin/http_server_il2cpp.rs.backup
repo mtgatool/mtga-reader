@@ -16,8 +16,13 @@ use std::process::Command;
 use std::sync::Mutex;
 use tower_http::cors::{Any, CorsLayer};
 
-// Use the existing IL2CPP offsets implementation
-use mtga_reader::il2cpp::Il2CppOffsets;
+// Use the existing IL2CPP implementation
+use mtga_reader::il2cpp::{Il2CppBackend, Il2CppOffsets};
+use mtga_reader::backend::{RuntimeBackend, TypeDef, FieldDef, MemoryReader};
+
+// IL2CPP offsets - from existing il2cpp module (Unity 2021.x)
+// Use IL2CPP type codes from the common module
+use mtga_reader::common::TypeCode;
 
 // Helper to get shared offsets (inline for convenience)
 fn get_offsets() -> Il2CppOffsets {
@@ -138,7 +143,7 @@ async fn get_assembly_classes(
                 }
 
                 // Read class name
-                if let Some(name_addr) = class_ptr.checked_add(get_offsets().class_name as usize) {
+                if let Some(name_addr) = class_ptr.checked_add(offsets::CLASS_NAME) {
                     let name_ptr = state.reader.read_ptr(name_addr);
                     if name_ptr > 0 && name_ptr < 0x400000000 {
                         let name = state.reader.read_string(name_ptr);
@@ -198,7 +203,7 @@ async fn search_classes(
                     continue;
                 }
 
-                if let Some(name_addr) = class_ptr.checked_add(get_offsets().class_name as usize) {
+                if let Some(name_addr) = class_ptr.checked_add(offsets::CLASS_NAME) {
                     let name_ptr = state.reader.read_ptr(name_addr);
                     if name_ptr > 0 && name_ptr < 0x400000000 {
                         let name = state.reader.read_string(name_ptr);
@@ -365,7 +370,7 @@ async fn read_static_field(
             .find(|f| f.name == field_name && f.is_static)
             .ok_or(StatusCode::NOT_FOUND)?;
 
-        let static_fields = match class_addr.checked_add(get_offsets().class_static_fields as usize) {
+        let static_fields = match class_addr.checked_add(offsets::CLASS_STATIC_FIELDS) {
             Some(addr) => state.reader.read_ptr(addr),
             None => return Ok(serde_json::Value::Null),
         };
@@ -574,7 +579,7 @@ fn find_class_by_name(reader: &MemReader, type_info_table: usize, name: &str) ->
         if class_ptr == 0 {
             continue;
         }
-        let name_ptr = match class_ptr.checked_add(get_offsets().class_name as usize) {
+        let name_ptr = match class_ptr.checked_add(offsets::CLASS_NAME) {
             Some(addr) => reader.read_ptr(addr),
             None => continue,
         };
@@ -610,7 +615,7 @@ fn read_class_name(reader: &MemReader, class: usize) -> String {
     if class == 0 || class < 0x100000 {
         return String::new();
     }
-    let name_ptr = match class.checked_add(get_offsets().class_name as usize) {
+    let name_ptr = match class.checked_add(offsets::CLASS_NAME) {
         Some(addr) => reader.read_ptr(addr),
         None => return String::new(),
     };
@@ -621,258 +626,148 @@ fn read_class_namespace(reader: &MemReader, class: usize) -> String {
     if class == 0 || class < 0x100000 {
         return String::new();
     }
-    let ns_ptr = match class.checked_add(get_offsets().class_namespace as usize) {
+    let ns_ptr = match class.checked_add(offsets::CLASS_NAMESPACE) {
         Some(addr) => reader.read_ptr(addr),
         None => return String::new(),
     };
     reader.read_string(ns_ptr)
 }
 
-fn get_class_fields(reader: &MemReader, class_addr: usize) -> Vec<FieldInfo> {
-    // Wrapper to get type_info_table from state
-    with_state(|state| -> Result<Vec<FieldInfo>, StatusCode> {
-        Ok(get_class_fields_internal(reader, class_addr, state.type_info_table))
-    }).unwrap_or_else(|_| Vec::new())
-}
-
 fn read_type_name(reader: &MemReader, type_ptr: usize) -> String {
-    read_type_name_with_table(reader, type_ptr, 0)
-}
-
-fn read_type_name_with_table(reader: &MemReader, type_ptr: usize, type_info_table: usize) -> String {
     if type_ptr == 0 || type_ptr < 0x100000 {
         return "unknown".to_string();
     }
 
     // Read Il2CppType structure
     // attrs field contains: type code in low byte, attribute flags in upper bits
-    let attrs = match type_ptr.checked_add(get_offsets().type_attrs as usize) {
+    let attrs = match type_ptr.checked_add(offsets::TYPE_ATTRS) {
         Some(addr) => reader.read_u32(addr),
         None => return "unknown".to_string(),
     };
     let type_enum = (attrs & 0xFF) as u8;  // Type code is in lowest byte
 
-    // Debug first few reads
-    static DEBUG_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-    let count = DEBUG_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    if count < 15 {
-        // Read what's in the Il2CppType structure
-        let data_at_0 = reader.read_ptr(type_ptr);
-        let u32_at_8 = reader.read_u32(type_ptr + 8);
-        let u32_at_c = reader.read_u32(type_ptr + 12);
-        eprintln!("    read_type_name: type_ptr=0x{:x}", type_ptr);
-        eprintln!("      Il2CppType.data (+0x0): 0x{:x}", data_at_0);
-        eprintln!("      Il2CppType.attrs (+0x8): 0x{:08x} (type_enum=0x{:02x})", attrs, type_enum);
-        eprintln!("      Il2CppType.??? (+0xc): 0x{:08x}", u32_at_c);
-    }
-
     // Handle primitive types
     match type_enum {
-        0x01 => {
-            // SPECIAL CASE: In IL2CPP, instance fields often have type_enum=0x01 but
-            // still have valid type_data. Try to read it.
-            let type_data_test = match type_ptr.checked_add(get_offsets().type_data as usize) {
-                Some(addr) => reader.read_ptr(addr),
-                None => 0,
-            };
-            if type_data_test > 0x100000 && type_data_test < 0x400000000 {
-                if count < 15 {
-                    eprintln!("      VOID with type_data=0x{:x}, will try to read as class", type_data_test);
-                }
-                // Fall through to try reading type_data as a class pointer
-            } else {
-                return "void".to_string();
-            }
-        }
-        0x02 => return "bool".to_string(),
-        0x03 => return "char".to_string(),
-        0x04 => return "sbyte".to_string(),
-        0x05 => return "byte".to_string(),
-        0x06 => return "short".to_string(),
-        0x07 => return "ushort".to_string(),
-        0x08 => return "int".to_string(),
-        0x09 => return "uint".to_string(),
-        0x0a => return "long".to_string(),
-        0x0b => return "ulong".to_string(),
-        0x0c => return "float".to_string(),
-        0x0d => return "double".to_string(),
-        0x0e => return "string".to_string(),
-        0x18 => return "nint".to_string(),
-        0x19 => return "nuint".to_string(),
-        0x1c => return "object".to_string(),
+        il2cpp_types::VOID => return "void".to_string(),
+        il2cpp_types::BOOLEAN => return "bool".to_string(),
+        il2cpp_types::CHAR => return "char".to_string(),
+        il2cpp_types::I1 => return "sbyte".to_string(),
+        il2cpp_types::U1 => return "byte".to_string(),
+        il2cpp_types::I2 => return "short".to_string(),
+        il2cpp_types::U2 => return "ushort".to_string(),
+        il2cpp_types::I4 => return "int".to_string(),
+        il2cpp_types::U4 => return "uint".to_string(),
+        il2cpp_types::I8 => return "long".to_string(),
+        il2cpp_types::U8 => return "ulong".to_string(),
+        il2cpp_types::R4 => return "float".to_string(),
+        il2cpp_types::R8 => return "double".to_string(),
+        il2cpp_types::STRING => return "string".to_string(),
+        il2cpp_types::I => return "nint".to_string(),
+        il2cpp_types::U => return "nuint".to_string(),
+        il2cpp_types::OBJECT => return "object".to_string(),
         _ => {}
     }
 
     // For reference types (CLASS, VALUETYPE, etc.), read the data pointer
-    let type_data = match type_ptr.checked_add(get_offsets().type_data as usize) {
+    let type_data = match type_ptr.checked_add(offsets::TYPE_DATA) {
         Some(addr) => reader.read_ptr(addr),
         None => return "Unknown".to_string(),
     };
 
-    if count < 15 {
-        eprintln!("      type_data=0x{:x}", type_data);
-    }
-
     if type_data == 0 || type_data < 0x100000 {
-        if count < 15 {
-            eprintln!("      -> Invalid type_data, returning Type_{:x}", type_enum);
-        }
         return format!("Type_{:x}", type_enum);
     }
 
-    // IL2CPP Type Data Interpretation:
-    // In IL2CPP metadata v29+ (Unity 2021+), type_data is a union that can be:
-    // - klassIndex (TypeDefinitionIndex) for CLASS/VALUETYPE
-    // - Il2CppClass* pointer in some cases
-    // Try multiple interpretations:
-
-    // 1. Try type_data as klassIndex (treating as small integer index)
-    if type_info_table != 0 && type_data < 100000 {
-        let class_ptr = reader.read_ptr(type_info_table + type_data * 8);
-        if class_ptr > 0x100000 && class_ptr < 0x400000000 {
-            let name = read_class_name(reader, class_ptr);
-            if !name.is_empty() && name.chars().all(|c| c.is_ascii_graphic() || c == '_' || c == '<' || c == '>') {
-                if count < 15 {
-                    eprintln!("      -> type_info_table[{}] = 0x{:x} -> name='{}'", type_data, class_ptr, name);
-                }
-                let namespace = read_class_namespace(reader, class_ptr);
-                return if namespace.is_empty() { name } else { format!("{}.{}", namespace, name) };
-            }
-        }
-    }
-
-    // 2. Try type_data as direct Il2CppClass pointer
-    // Scan multiple possible class_name offsets since structure might vary
-    for name_offset in [0x10, 0x18, 0x20, 0x28, 0x30] {
-        if let Some(test_addr) = type_data.checked_add(name_offset) {
-            let name_ptr = reader.read_ptr(test_addr);
-            if name_ptr > 0x100000 && name_ptr < 0x400000000 {
-                let name = reader.read_string(name_ptr);
-                if !name.is_empty() && name.len() < 200 && name.chars().all(|c| c.is_ascii_graphic() || c == '_' || c == '<' || c == '>') {
-                    if count < 15 {
-                        eprintln!("      -> Direct Il2CppClass* at type_data+0x{:x} worked: '{}'", name_offset, name);
-                    }
-                    // Found valid name! Use this offset for namespace too
-                    let ns_offset = get_offsets().class_namespace as usize;
-                    let namespace = if let Some(ns_addr) = type_data.checked_add(ns_offset) {
-                        let ns_ptr = reader.read_ptr(ns_addr);
-                        if ns_ptr > 0x100000 { reader.read_string(ns_ptr) } else { String::new() }
-                    } else {
-                        String::new()
-                    };
-                    return if namespace.is_empty() { name } else { format!("{}.{}", namespace, name) };
-                }
-            }
-        }
-    }
-
-    // Fallback: format based on type_enum and type_data address
-    if count < 15 {
-        eprintln!("      -> All lookups failed, using fallback format");
-    }
+    // Read class name from type data (Il2CppClass*)
+    let name = read_class_name(reader, type_data);
+    let namespace = read_class_namespace(reader, type_data);
 
     match type_enum {
-        0x12 => format!("Class_0x{:x}", type_data),
-        0x11 => format!("ValueType_0x{:x}", type_data),
-        0x1d => format!("Unknown[]"),
-        0x14 => format!("Unknown[...]"),
-        0x0f => format!("Unknown*"),
-        0x15 => format!("Generic<...>"),
-        _ => format!("Type_{:x}", type_enum),
+        il2cpp_types::CLASS => {
+            if name.is_empty() {
+                format!("Class_0x{:x}", type_data)
+            } else if namespace.is_empty() {
+                name
+            } else {
+                format!("{}.{}", namespace, name)
+            }
+        }
+        il2cpp_types::VALUETYPE => {
+            if name.is_empty() {
+                format!("ValueType_0x{:x}", type_data)
+            } else if namespace.is_empty() {
+                name
+            } else {
+                format!("{}.{}", namespace, name)
+            }
+        }
+        il2cpp_types::SZARRAY => {
+            format!("{}[]", if name.is_empty() { "Unknown".to_string() } else { name })
+        }
+        il2cpp_types::ARRAY => {
+            format!("{}[...]", if name.is_empty() { "Unknown".to_string() } else { name })
+        }
+        il2cpp_types::PTR => {
+            format!("{}*", if name.is_empty() { "Unknown".to_string() } else { name })
+        }
+        il2cpp_types::GENERICINST => {
+            if namespace.is_empty() {
+                format!("{}<...>", name)
+            } else {
+                format!("{}.{}<...>", namespace, name)
+            }
+        }
+        _ => {
+            if name.is_empty() {
+                format!("Type_{:x}", type_enum)
+            } else if namespace.is_empty() {
+                name
+            } else {
+                format!("{}.{}", namespace, name)
+            }
+        }
     }
 }
 
-fn get_class_fields_internal(reader: &MemReader, class_addr: usize, type_info_table: usize) -> Vec<FieldInfo> {
+fn get_class_fields(reader: &MemReader, class_addr: usize) -> Vec<FieldInfo> {
     let mut fields = Vec::new();
-    let offsets = get_offsets();
-
-    // Read field count using the correct offset from offsets table
-    let field_count_addr = match class_addr.checked_add(offsets.class_field_count as usize) {
-        Some(addr) => addr,
-        None => {
-            eprintln!("DEBUG get_class_fields: Failed to add field_count offset to class_addr");
-            return fields;
-        }
-    };
-
-    let field_count = reader.read_i32(field_count_addr);
-
-    let fields_ptr = match class_addr.checked_add(offsets.class_fields as usize) {
+    let fields_ptr = match class_addr.checked_add(offsets::CLASS_FIELDS) {
         Some(addr) => reader.read_ptr(addr),
-        None => {
-            eprintln!("DEBUG get_class_fields: Failed to add class_fields offset to class_addr");
-            return fields;
-        }
+        None => return fields,
     };
-
-    eprintln!("DEBUG get_class_fields: class_addr=0x{:x}, field_count={}, fields_ptr=0x{:x}",
-              class_addr, field_count, fields_ptr);
 
     if fields_ptr == 0 || fields_ptr < 0x100000 {
-        eprintln!("DEBUG get_class_fields: Invalid fields_ptr");
         return fields;
     }
 
-    // Determine how many fields to scan
-    // Some IL2CPP class types (MonoBehaviours, singletons, etc.) may have field_count
-    // at different offsets. If field_count is unreasonable, scan until we hit invalid fields.
-    let max_fields = if field_count > 0 && field_count < 500 {
-        field_count as usize
-    } else {
-        eprintln!("DEBUG get_class_fields: Unreasonable field_count: {}, will scan up to 200 fields", field_count);
-        200  // Scan until we hit invalid field names
-    };
-
-    for i in 0..max_fields {
-        let field = match fields_ptr.checked_add(i * 0x20) {
+    for i in 0..100 {
+        let field = match fields_ptr.checked_add(i * offsets::FIELD_INFO_SIZE) {
             Some(addr) => addr,
             None => break,
         };
         let name_ptr = reader.read_ptr(field);
         if name_ptr == 0 || name_ptr < 0x100000 {
-            eprintln!("DEBUG: field {} has invalid name_ptr: 0x{:x}", i, name_ptr);
             break;
         }
 
         let name = reader.read_string(name_ptr);
-
-        // Stop if we hit garbage field names (when scanning without valid field_count)
-        if name.is_empty() || name.len() > 200 || !name.chars().all(|c| c.is_ascii_graphic() || c == '_') {
-            eprintln!("DEBUG: field {} has invalid name: {:?}, stopping scan", i, name);
-            break;
-        }
-        let offset = match field.checked_add(get_offsets().field_offset as usize) {
+        let offset = match field.checked_add(offsets::FIELD_OFFSET) {
             Some(addr) => reader.read_i32(addr),
             None => break,
         };
 
-        let type_ptr = match field.checked_add(get_offsets().field_type as usize) {
+        let type_ptr = match field.checked_add(offsets::FIELD_TYPE) {
             Some(addr) => reader.read_ptr(addr),
             None => break,
         };
 
-        // Debug: Read all pointers in field structure to see what's there
-        if i < 5 {
-            eprintln!("  Field[{}] '{}' at field_addr=0x{:x}:", i, name, field);
-            for off in [0x0, 0x8, 0x10, 0x18] {
-                let val = reader.read_ptr(field + off);
-                eprintln!("    +0x{:02x}: 0x{:x}", off, val);
-            }
-        }
-
         // Read type attributes to determine static/const flags
         let (is_static, is_const) = if type_ptr > 0 && type_ptr < 0x400000000 {
-            match type_ptr.checked_add(get_offsets().type_attrs as usize) {
+            match type_ptr.checked_add(offsets::TYPE_ATTRS) {
                 Some(addr) => {
                     let attrs = reader.read_u32(addr);
                     let is_static = (attrs & 0x10) != 0;
                     let is_const = (attrs & 0x40) != 0;
-
-                    if i < 5 {
-                        eprintln!("    type_ptr=0x{:x}, attrs=0x{:08x}, type_enum=0x{:02x}, is_static={}, is_const={}",
-                                 type_ptr, attrs, attrs & 0xFF, is_static, is_const);
-                    }
-
                     (is_static, is_const)
                 }
                 None => (false, false),
@@ -882,7 +777,7 @@ fn get_class_fields_internal(reader: &MemReader, class_addr: usize, type_info_ta
         };
 
         // Read type name using proper IL2CPP type decoding
-        let type_name = read_type_name_with_table(reader, type_ptr, type_info_table);
+        let type_name = read_type_name(reader, type_ptr);
 
         fields.push(FieldInfo {
             name,
@@ -1190,7 +1085,7 @@ async fn main() {
                     if let Some(entry_addr) = table.checked_add(i * 8) {
                         let class_ptr = reader.read_ptr(entry_addr);
                         if class_ptr > 0x100000 && class_ptr < 0x400000000 {
-                            if let Some(name_addr) = class_ptr.checked_add(get_offsets().class_name as usize) {
+                            if let Some(name_addr) = class_ptr.checked_add(offsets::CLASS_NAME) {
                                 let name_ptr = reader.read_ptr(name_addr);
                                 if name_ptr > 0 && name_ptr < 0x400000000 {
                                     let name = reader.read_string(name_ptr);
@@ -1231,7 +1126,7 @@ async fn main() {
                         if let Some(entry_addr) = table.checked_add(i * 8) {
                             let class_ptr = reader.read_ptr(entry_addr);
                             if class_ptr > 0x100000 && class_ptr < 0x400000000 {
-                                if let Some(name_addr) = class_ptr.checked_add(get_offsets().class_name as usize) {
+                                if let Some(name_addr) = class_ptr.checked_add(offsets::CLASS_NAME) {
                                     let name_ptr = reader.read_ptr(name_addr);
                                     if name_ptr > 0 && name_ptr < 0x400000000 {
                                         let name = reader.read_string(name_ptr);
@@ -1269,26 +1164,17 @@ async fn main() {
 
     println!("Using type info table: 0x{:x}", type_info_table);
 
-    // Initialize state with shared offsets
-    let offsets = get_offsets();
-    println!("\nUsing IL2CPP Offsets (Unity 2021.x):");
-    println!("  class_fields: 0x{:x}", offsets.class_fields);
-    println!("  class_static_fields: 0x{:x}", offsets.class_static_fields);
-    println!("  field_offset: 0x{:x}", offsets.field_offset);
-    println!("  field_type: 0x{:x}", offsets.field_type);
-    println!("  type_attrs: 0x{:x}", offsets.type_attrs);
-
+    // Initialize state
     {
         let mut state = IL2CPP_STATE.lock().unwrap();
         *state = Some(Il2CppState {
             reader,
             type_info_table,
             class_cache: HashMap::new(),
-            offsets,
         });
     }
 
-    println!("\nIL2CPP backend initialized");
+    println!("IL2CPP backend initialized");
 
     // Configure CORS
     let cors = CorsLayer::new()

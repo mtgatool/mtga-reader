@@ -132,24 +132,24 @@ impl Default for Il2CppOffsets {
 
 impl Il2CppOffsets {
     /// Offsets for Unity 2021.x IL2CPP (metadata v29+)
-    /// Updated with MTGA-discovered offsets
+    /// Updated with MTGA-discovered offsets (2026-01-24)
     pub fn unity_2021() -> Self {
         Il2CppOffsets {
             version_name: "Unity 2021.x".to_string(),
 
-            // Il2CppClass - updated from MTGA analysis
+            // Il2CppClass - verified from MTGA offset testing
             class_image: 0x0,
             class_name: 0x10,
             class_namespace: 0x18,
-            class_parent: 0x48,      // Updated from MTGA
-            class_fields: 0x70,      // Updated from MTGA
-            class_field_count: 0x11C,
-            class_static_fields: 0xA8, // Updated from MTGA
-            class_methods: 0x88,     // Updated from MTGA
-            class_instance_size: 0xF8, // Updated from MTGA
+            class_parent: 0x48,
+            class_fields: 0x80,      // CORRECTED: Was 0x70, verified at 0x80
+            class_field_count: 0x124, // CORRECTED: Was 0x11C, verified at 0x124
+            class_static_fields: 0xA8, // Verified correct
+            class_methods: 0x88,
+            class_instance_size: 0xF8,
             class_flags: 0xFC,
             class_type_definition: 0x68,
-            class_generic_class: 0x50, // Updated from MTGA
+            class_generic_class: 0x50,
 
             global_offsets: GlobalPointerOffsets::mtga(),
 

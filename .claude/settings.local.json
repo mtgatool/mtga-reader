@@ -23,7 +23,8 @@
       "Bash(npm install:*)",
       "Bash(npx napi build:*)",
       "Bash(grep:*)",
-      "Bash(python -c:*)"
+      "Bash(python -c:*)",
+      "Bash(jq:*)"
     ]
   }
 }
