@@ -61,5 +61,67 @@ export declare function getInstanceField(address: number, fieldName: string): an
 export declare function getStaticField(classAddress: number, fieldName: string): any
 export declare function getDictionary(address: number): DictionaryData
 export declare function readData(processName: string, fields: Array<string>): any
+/**
+ * Signature-based card-collection reader. Scans the MTGA process
+ * heap for a `Dictionary<int, int>` object whose contents match
+ * the shape of an Arena player collection (enough entries, keys in
+ * the Arena card-id range, values in the quantity range) and
+ * returns the list of (cardId, quantity) entries.
+ *
+ * This is a macOS-only path added as a local patch: the
+ * `readData` walker starting from PAPA / WrapperController turned
+ * out to be too fragile against current Arena builds (IL2CPP
+ * metadata layout drift, runtime-class-vs-metadata-class
+ * indirection, inconsistent CLASS_NAME offsets on runtime-allocated
+ * class structs). The signature scan sidesteps every one of those
+ * by searching for the only dictionary in the process whose entries
+ * all look like real card entries.
+ *
+ * Returns a JSON array of `{ "cardId": int, "quantity": int }`
+ * objects on success, or `{ "error": string }` on any failure.
+ */
+export declare function readMtgaCards(processName: string): any
+/**
+ * Inventory reader. Returns the current player's wildcard counts
+ * plus currency and vault progress, read directly from the
+ * `ClientPlayerInventory` singleton in Arena's memory.
+ *
+ * Returns `{ wcCommon, wcUncommon, wcRare, wcMythic, gold, gems,
+ * vaultProgress }` on success, `{ error }` on failure.
+ *
+ * `vaultProgress` is a number in `0.0 – 100.0` matching Arena's UI
+ * exactly (e.g. `58.9` when the UI shows "Vault: 58.9%"). The raw
+ * field is stored as an 8-byte `double` in the C# class, not an
+ * int — NOTES / IL2CPP_RESEARCH_SUMMARY.md were wrong about this.
+ *
+ * Set `MTGA_DEBUG_INVENTORY=1` for verbose stderr diagnostics (class
+ * location, field dump, candidate counts).
+ */
+export declare function readMtgaInventory(processName: string): any
+/**
+ * Mono-backend card-collection reader. Targets Arena processes running
+ * the Mono scripting backend (Windows native or Wine). Pass the process
+ * name or path fragment (e.g. "MTGA.exe" for Wine).
+ */
+export declare function readMtgaCardsMono(processName: string): any
+/**
+ * Mono-backend inventory reader.
+ * Pass known_gold and known_gems (visible in Arena's UI) for exact
+ * anchoring. Pass 0 for both to use the generic scanner (less reliable).
+ */
+export declare function readMtgaInventoryMono(processName: string, knownGold: number, knownGems: number): any
+/** Debug: probe a MonoClass struct to find the name field offset. */
+export declare function probeMonoClass(processName: string, classAddress: string): any
+/**
+ * Debug: read raw bytes from a Mono Arena process at a given address.
+ * Returns hex string. Used for discovering Mono struct layouts.
+ */
+export declare function readMonoBytes(processName: string, address: string, length: number): any
+/**
+ * Debug probe: search heap for two adjacent i32 values and dump context.
+ * Use to discover field offsets on Mono.
+ * Example: probeHeapForI32Pair("MTGA.exe", 1825, 610) finds gold+gems.
+ */
+export declare function probeHeapForI32Pair(processName: string, valA: number, valB: number): any
 export declare function readClass(processName: string, address: number): any
 export declare function readGenericInstance(processName: string, address: number): any

@@ -8,6 +8,7 @@ pub mod offsets;
 pub mod type_definition;
 pub mod field_definition;
 pub mod pe_reader;
+pub mod scanner;
 
 pub use reader::MonoBackend;
 pub use offsets::MonoOffsets;

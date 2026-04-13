@@ -310,7 +310,7 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { isAdmin, findProcess, init, close, isInitialized, getAssemblies, getAssemblyClasses, getClassDetails, getInstance, getInstanceField, getStaticField, getDictionary, readData, readClass, readGenericInstance } = nativeBinding
+const { isAdmin, findProcess, init, close, isInitialized, getAssemblies, getAssemblyClasses, getClassDetails, getInstance, getInstanceField, getStaticField, getDictionary, readData, readMtgaCards, readMtgaInventory, readMtgaCardsMono, readMtgaInventoryMono, probeMonoClass, readMonoBytes, probeHeapForI32Pair, readClass, readGenericInstance } = nativeBinding
 
 module.exports.isAdmin = isAdmin
 module.exports.findProcess = findProcess
@@ -325,5 +325,12 @@ module.exports.getInstanceField = getInstanceField
 module.exports.getStaticField = getStaticField
 module.exports.getDictionary = getDictionary
 module.exports.readData = readData
+module.exports.readMtgaCards = readMtgaCards
+module.exports.readMtgaInventory = readMtgaInventory
+module.exports.readMtgaCardsMono = readMtgaCardsMono
+module.exports.readMtgaInventoryMono = readMtgaInventoryMono
+module.exports.probeMonoClass = probeMonoClass
+module.exports.readMonoBytes = readMonoBytes
+module.exports.probeHeapForI32Pair = probeHeapForI32Pair
 module.exports.readClass = readClass
 module.exports.readGenericInstance = readGenericInstance

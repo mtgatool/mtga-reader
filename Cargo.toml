@@ -35,7 +35,7 @@ sudo = "0.6.0"
 proc_mem = "0.1.6"
 is_elevated = "0.1.2"
 pelite = "0.10"
-winapi = { version = "0.3", features = ["psapi", "processthreadsapi", "handleapi", "winnt"] }
+winapi = { version = "0.3", features = ["psapi", "processthreadsapi", "handleapi", "winnt", "memoryapi", "errhandlingapi", "impl-default"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mach2 = "0.4"
