@@ -61,5 +61,25 @@ export declare function getInstanceField(address: number, fieldName: string): an
 export declare function getStaticField(classAddress: number, fieldName: string): any
 export declare function getDictionary(address: number): DictionaryData
 export declare function readData(processName: string, fields: Array<string>): any
+/**
+ * Signature-based card-collection reader. Scans the MTGA process
+ * heap for a `Dictionary<int, int>` object whose contents match
+ * the shape of an Arena player collection (enough entries, keys in
+ * the Arena card-id range, values in the quantity range) and
+ * returns the list of (cardId, quantity) entries.
+ *
+ * This is a macOS-only path added as a local patch: the
+ * `readData` walker starting from PAPA / WrapperController turned
+ * out to be too fragile against current Arena builds (IL2CPP
+ * metadata layout drift, runtime-class-vs-metadata-class
+ * indirection, inconsistent CLASS_NAME offsets on runtime-allocated
+ * class structs). The signature scan sidesteps every one of those
+ * by searching for the only dictionary in the process whose entries
+ * all look like real card entries.
+ *
+ * Returns a JSON array of `{ "cardId": int, "quantity": int }`
+ * objects on success, or `{ "error": string }` on any failure.
+ */
+export declare function readMtgaCards(processName: string): any
 export declare function readClass(processName: string, address: number): any
 export declare function readGenericInstance(processName: string, address: number): any
