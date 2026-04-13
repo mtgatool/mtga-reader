@@ -12,16 +12,51 @@ The fork is **not currently wired into anything**. `commander-tuner`'s
 no-privileges-required alternative. These notes exist so the work is
 recoverable if someone wants to pick it back up later.
 
+## UPDATE 2026-04-11: arena_id → set/collector_number now works
+
+`readMtgaCardDatabase("MTGA")` (new napi export) returns **23,694 rows** of
+`{ grpId, set, collectorNumber, titleId }` in ~11 seconds, covering Arena's
+entire in-process card database. Every grp_id from `readMtgaCards` resolves
+to a real set code + collector number. From there, downstream name
+resolution can hit `https://api.scryfall.com/cards/{set}/{number}` which
+returns cards even when Scryfall's `arena_id` field is null — closing the
+gap that originally drove us to the `untapped-csv` workaround.
+
+The rest of this document has large sections that were written before this
+work landed and are now stale. See the dedicated "UPDATE 2026-04-11"
+subsections below for the corrections. The headline change: we now get
+set + collector number directly from Arena's own memory and resolve names
+via Scryfall's `/cards/{set}/{number}` endpoint (which works even for
+cards where Scryfall's `arena_id` field is null), so the old framing
+around needing a third-party name database no longer applies.
+
 ## What works
 
 - Builds cleanly on `darwin-arm64` with `npm install && npm run build`
   (produces `mtga-reader.darwin-arm64.node`, already present in the repo root
   from the last build).
-- `readMtgaCards("MTGA")` (our custom napi function added to this fork) scans
+- `readMtgaCards("MTGA")` (custom napi function added in this fork) scans
   Arena's live process memory, finds the `Cards` dictionary via a signature
   scan, and returns `{ cards: [{cardId: int, quantity: int}, ...] }`.
-- The scan is fast (<1s wall clock) and deterministic against a running Arena
-  process.
+- `readMtgaCardDatabase("MTGA")` (**new 2026-04-11**) returns the full
+  in-process card database as
+  `{ cards: [{grpId, set, collectorNumber, titleId}, ...] }`, ~23.7k rows.
+  Combine with `readMtgaCards` for a complete `grp_id → (quantity, set,
+  collector_number)` mapping, then resolve names via Scryfall
+  `/cards/{set}/{number}`. Set `MTGA_DEBUG_CARD_DB=1` to enable verbose
+  stderr diagnostics (field dumps, byte hexdump of the first entry, etc.).
+- `readMtgaInventory("MTGA")` (**new 2026-04-11**) returns the current
+  player's wildcard counts plus gold, gems, and vault progress from the
+  `ClientPlayerInventory` singleton:
+  `{ wcCommon, wcUncommon, wcRare, wcMythic, gold, gems, vaultProgress }`.
+  Ground-truth verified against Arena's UI (37/11/1/1 wildcards,
+  825 gold, 610 gems, 58.9% vault). `vaultProgress` is a decimal
+  percentage in the `0.0 – 100.0` range matching the UI exactly — DO NOT
+  multiply or divide. Set `MTGA_DEBUG_INVENTORY=1` for verbose
+  diagnostics (class variant enumeration, candidate dump, raw vault
+  bytes under multiple type interpretations).
+- Both scans are fast (<12s wall clock) and deterministic against a running
+  Arena process.
 - Requires `sudo` to run because `task_for_pid` on macOS needs elevated
   privileges unless the calling binary is signed with
   `com.apple.security.cs.debugger`, which requires an Apple developer
@@ -37,19 +72,73 @@ recoverable if someone wants to pick it back up later.
   `sum + cap at 4` comment block.)
 - **Scryfall's `default_cards.json` has null `arena_id` for many recent Arena
   printings** (Alchemy Y-sets, Avatar TLA/TLE, Final Fantasy, Lorwyn Eclipsed,
-  etc.) so downstream name resolution misses ~1500 cards when using this
-  reader alone. This is a Scryfall-side upstream data ingestion lag, not a
-  local bulk staleness issue. Running `download-bulk` doesn't help.
-- **`PAPA._instance` reads as `0`** on current Arena builds. Upstream's code
-  path walks `PAPA._instance.InventoryManager._inventoryServiceWrapper.Cards`
-  and that first step is broken. Unknown root cause — probably a
-  GC-static-vs-value-static layout difference in the IL2CPP class struct, or a
-  stale `CLASS_STATIC_FIELDS` offset that happens to work for some value-type
-  statics but not for reference-type statics. **Our signature scan bypasses
-  this entirely** by finding the Cards dict directly rather than walking to
-  it from PAPA, so the broken static read doesn't block card extraction, but
-  it prevents walking the other fields on PAPA (InventoryManager, EventManager,
-  MatchManager, etc.) that might be interesting to read in the future.
+  etc.) so downstream name resolution misses ~1500 cards when going through
+  `arena_id` alone. **This no longer blocks us** — `readMtgaCardDatabase`
+  now returns `set` + `collector_number` for every card, and
+  `/cards/{set}/{number}` on Scryfall resolves cards even when `arena_id`
+  is null.
+- **The PAPA walker is broken on current Arena builds, but it no longer
+  matters.** Both `readMtgaCards` and `readMtgaCardDatabase` reach their
+  target dicts via direct heap signature scans, bypassing PAPA entirely.
+  The walker itself (`find_papa_instance_by_field_verification` in
+  `src/napi/mod.rs:2149`) finds ~200 slots where the klass pointer matches
+  PAPA_class but verifies 0 as real PAPA instances — either the scanned
+  heap regions don't cover the GC-managed region where the real singleton
+  lives, or the verification strategy (comparing class pointers instead of
+  class names, which `find_wrapper_controller_instance` documents as the
+  robust approach) is wrong. Fixing it would unlock walking
+  `InventoryManager` / `EventManager` / `MatchManager` fields from PAPA for
+  game-state reading, but it is not on the critical path for card data.
+
+### UPDATE 2026-04-11: the CardPrintingRecord layout claim was wrong
+
+The field-layout table below ("Replicating option (a)…") originally said
+`CardPrintingRecord` is the runtime class the card DB dictionary holds,
+with `GrpId@0x10`, `TitleId@0x20`, `ExpansionCode@0x50`,
+`CollectorNumber@0x70`. That's only half right:
+
+1. **The runtime dict value class is `CardPrintingData`, not
+   `CardPrintingRecord`.** `CardPrintingData` is a wrapper with ~47 fields
+   for cached computed values (`_convertedManaCost`, `_isLand`, etc.) and
+   an **embedded CardPrintingRecord struct** at offset `0xC0` under a field
+   literally named `Record`.
+2. **`Record` is a value-type struct, not a pointer.** Its 352-byte
+   footprint (offset `0xC0` to `0x220`) matches CardPrintingRecord's own
+   field layout (`Blank@0x0`..`AdditionalFrameDetails@0x150`). There is no
+   indirection to dereference.
+3. **When embedded as a struct, Il2CppObject header size (16 bytes) drops
+   out.** The class-level field offsets from `get_class_fields(cpr_class)`
+   include the header (that's why `GrpId` reads as `0x10` on the standalone
+   class — `0x10` = the 16-byte header). When the struct is inlined, there
+   is no header; so the effective offset on the wrapper is
+   `record_offset + (class_field_offset - 0x10)`. For the current build:
+   - `GrpId` → `0xC0 + (0x10 - 0x10)` = `0xC0`
+   - `TitleId` → `0xC0 + (0x20 - 0x10)` = `0xD0`
+   - `ExpansionCode` → `0xC0 + (0x50 - 0x10)` = `0x100`
+   - `CollectorNumber` → `0xC0 + (0x70 - 0x10)` = `0x120`
+4. **`ExpansionCode` and `CollectorNumber` are `Il2CppString*`, not C
+   strings.** Layout: `klass(8) + monitor(8) + length(i32) + utf16_chars`.
+   NOTES originally described them as "pointer to a string like `'tle'`"
+   which is true but under-specified — you need to decode them as UTF-16
+   managed strings. The new `read_il2cpp_string` helper in
+   `src/napi/mod.rs` handles this.
+5. **Heap-instance classes are a different `Il2CppClass*` than the metadata
+   variant `find_class_by_direct_scan` returns.** The metadata class for
+   `CardPrintingRecord` (what we find by scanning `__DATA`) is at a
+   different address than the runtime class `CardPrintingData` instances
+   reference. Comparing by class POINTER fails; comparing by class NAME
+   works. This confirms the comment in `find_wrapper_controller_instance`
+   about IL2CPP keeping separate structs for "metadata table entry" vs
+   "runtime vtable owner."
+6. **`get_class_fields` has a 50-entry hard limit and will read off the
+   end of classes with >50 fields into adjacent class metadata.** Not a
+   problem for CardPrintingRecord (exactly 50 fields, all valid), but on
+   `CardPrintingData` (which has 47 real fields plus the Record struct
+   plus two tail pointers) the last few entries returned by
+   `get_class_fields` are garbage names picked up from an adjacent class.
+   Work around it by looking fields up by NAME — the first match is
+   always the real one because class-internal fields come before the
+   out-of-bounds overflow.
 
 ## Local patches on top of upstream HEAD
 
@@ -90,6 +179,66 @@ All in `src/napi/mod.rs` and `src/mono_reader.rs`. None have been sent upstream.
    contents. Bypasses all of upstream's PAPA walker / WrapperController
    walker / InventoryManager walker / field-walk machinery.
 
+4c. **`read_mtga_inventory_impl` + `readMtgaInventory` napi export**
+   (`src/napi/mod.rs`, added 2026-04-11). Heap-signature-scan reader
+   for `ClientPlayerInventory`. Strategy:
+   - `find_all_classes_by_name("ClientPlayerInventory")` enumerates
+     every `Il2CppClass*` in `__DATA` with that name (handles the
+     metadata-vs-runtime class duplication preemptively).
+   - `resolve_inventory_field_offsets` looks up `wcCommon`,
+     `wcUncommon`, `wcRare`, `wcMythic`, `gold`, `gems`,
+     `vaultProgress` by name with multiple candidate-name fallbacks
+     (bare name, `<…>k__BackingField`, WildCard-prefixed log-style,
+     underscore-prefixed).
+   - `scan_heap_for_client_player_inventory` uses the class-pointer
+     set as a strong pre-filter (no per-slot `read_class_name` cost,
+     which is what made the naive approach unusable) and then
+     applies `inventory_fields_look_plausible` — wildcards in
+     `[0, 99_999]`, gold `[0, 10^9]`, gems `[0, 10^7]`, with a
+     non-zero signal requirement to reject uninitialized / metadata
+     false positives. `inventory_activity_score` breaks ties in
+     favor of the live instance over cached/backup copies.
+   - Multiple ClientPlayerInventory objects usually exist on the
+     heap (active + cached); the activity score correctly identifies
+     the live one (e.g. in testing, the winning instance had score
+     1485 vs a stale zombie at score 76).
+
+   **Key layout correction** vs. `IL2CPP_RESEARCH_SUMMARY.md`:
+   `vaultProgress` is an **8-byte `double`**, not an `int32`. Field
+   spacing in the class metadata (`vaultProgress @ 0x30`,
+   `boosters @ 0x38`) confirms 8 bytes. The stored value is the UI
+   percentage directly (e.g. `58.9` for "Vault: 58.9%"). Reading it
+   as `int32` gives `0x33333333 = 858_993_459`, which is just the
+   low half of the `double` bit pattern
+   `0x404d733333333333`. Other fields on the class have shifted too:
+   `wcTrackPosition @ 0x28` is 8 bytes wide in the current build
+   (the summary said 32), and class now has 18 fields total vs. the
+   older shorter layout.
+
+4b. **`read_mtga_card_database_impl` + `readMtgaCardDatabase` napi export**
+   (`src/napi/mod.rs`, added 2026-04-11). Same heap-signature-scan approach
+   as `readMtgaCards` but looking for a `Dictionary<int,
+   CardPrintingData*>` instead of `Dictionary<int, int>`. Six new helpers:
+   - `read_il2cpp_string` — UTF-16 `Il2CppString*` decoder
+   - `RuntimeCardFieldOffsets` + `resolve_runtime_card_field_offsets` —
+     resolves the absolute field offsets on whichever class the dict
+     actually holds (handles both `CardPrintingRecord` directly and
+     `CardPrintingData` with its embedded-struct Record field)
+   - `find_card_database_instance` (fallback, unused when heap scan
+     succeeds) — PAPA-walker-based CardDatabase locator
+   - `find_card_printing_dictionary` (fallback) — enumerates
+     `CardDatabase` fields to find the printing dict
+   - `scan_heap_for_card_printing_dictionary` (**primary path**) —
+     heap-scans for a Dictionary whose value class NAME matches
+     `CardPrintingData` or `CardPrintingRecord`. Two-pass: first filters
+     by `hash==key` Dictionary invariant with stride 24
+     (`hash+next+key+pad+value_ptr` = `4+4+4+4+8`), then resolves the
+     observed value classes by name to work around the IL2CPP metadata-
+     vs-runtime class duplication.
+   - `read_card_printing_entries` — walks the found dict and returns
+     `(grp_id, value_ptr)` pairs.
+   All gated behind `MTGA_DEBUG_CARD_DB=1` for verbose stderr output.
+
 5. **Various diagnostic functions — `scan_for_type_info_table`,
    `find_class_by_direct_scan`, `dump_class_names_matching`,
    `find_papa_instance_via_static_field`, `find_wrapper_controller_instance`,
@@ -99,14 +248,24 @@ All in `src/napi/mod.rs` and `src/mono_reader.rs`. None have been sent upstream.
    delete if you're cleaning up for an upstream PR, but they're useful
    reference for how to probe specific aspects of Arena's in-process state.
 
-## CardPrintingRecord field layout
+## CardPrintingRecord field layout (historical reference)
 
-Captured by running `probe_card_printing_record()` from our own napi
-module against a live Arena process. The function calls
-`get_class_fields(cpr_class)`, which walks the `FieldInfo[]` array
-stored on Arena's own IL2CPP class metadata at startup — so it's
-authoritative for whatever Arena build is currently running. We did
-not consult any third-party reader to derive this table.
+Captured via our own `probe_card_printing_record` function in
+`src/napi/mod.rs`, which calls `get_class_fields(cpr_class)` on the live
+running Arena process. Reading IL2CPP metadata at the class's
+`class_fields` offset walks the `FieldInfo[]` array Arena itself populates
+at startup. This is authoritative for whatever Arena build is currently
+running.
+
+> **⚠️ Stale on the current build.** The dict that downstream code walks
+> no longer holds `CardPrintingRecord*` directly — it holds
+> `CardPrintingData*` which embeds a `CardPrintingRecord` struct at offset
+> `0xC0` (under a field literally named `Record`). The field offsets
+> inside the embedded struct are still accurate; what changed is the
+> wrapper. See the `readMtgaCardDatabase` UPDATE subsection for how the
+> live code finds and walks the dict. This table is retained because the
+> field names and semantic types (which fields are int vs string vs
+> array vs dict) are still correct for the embedded struct.
 
 **Class**: `CardPrintingRecord` in Assembly-CSharp. 50 fields,
 confirmed via `get_class_fields()` on current Arena:
@@ -166,74 +325,42 @@ confirmed via `get_class_fields()` on current Arena:
 
 ### Paths to resolve a grp_id to a card name
 
-**Path A — via `TitleId` + Arena's localization table (offline, untried)**:
+We shipped Path B. Path A is untried.
+
+**Path A — via `TitleId` + localization table (offline, untried)**:
 `TitleId` at offset `0x20` is an int ID into Arena's localization database,
 not a direct string pointer. Resolving to English text requires walking a
 localization data structure we haven't explored — likely keyed first by
-language code and then by TitleId, with some form of fallback handling,
-possibly lazy-loaded. The walker hasn't been written.
+language code and then by TitleId, with some form of fallback handling.
+Possibly lazy-loaded. The entry class is somewhere in the
+`Wotc.Mtga.Loc` namespace but the walker hasn't been written.
 
-**Path B — via `ExpansionCode` + `CollectorNumber` (online, simpler)**:
+**Path B — via `ExpansionCode` + `CollectorNumber` (online, shipped)**:
 `ExpansionCode` at `0x50` and `CollectorNumber` at `0x70` are both
-Il2CppString pointers (UTF-16 managed strings). With both, hit
-`https://api.scryfall.com/cards/{set}/{number}` — which **returns cards
-even when Scryfall's `arena_id` field is null** (verified during the
-investigation, e.g. `/cards/tle/162` returns `Diresight` with
-`arena_id: None`). Introduces a network dependency but that's
-cacheable on disk.
+`Il2CppString*` (UTF-16 managed strings, decoded by the `read_il2cpp_string`
+helper). With both, hit
+`https://api.scryfall.com/cards/{set}/{number}` which **returns cards
+even when Scryfall's `arena_id` field is null** — verified against
+Alchemy / Universes Beyond sets where `arena_id` is absent. This is
+what `readMtgaCardDatabase` exposes and what downstream callers use.
+It introduces a network dependency but that's cacheable on disk.
 
-### Finding CardPrintingRecord instances
+### Finding CardPrintingRecord instances (stale approach)
 
-Our direct heap scan for `obj[0] == cpr_class` produces **mostly false
-positives**. The sample we captured (`probe_card_printing_record` output)
-showed:
+The older approach described here — heap-scanning for `obj[0] == cpr_class`
+and filtering by field shape — was abandoned because single-field matches
+produce too many false positives (FieldInfo entries in dylib data, zeroed
+slots, and unrelated objects whose first 8 bytes happen to equal the class
+pointer).
 
-- **Instance 1** at `0x1036a9910`: `GrpId=75, TitleId=1`, rest mostly zero.
-  Looked like a tiny token or placeholder slot.
-- **Instance 2** at `0x10399d1a8`: all zeros. Uninitialized.
-- **Instance 3** at `0x103a320d8`: **GrpId=71806704** (a pointer value, not
-  an int) — the "class pointer" at offset 0 coincidentally matched
-  `cpr_class` but the struct at that address is some other type.
-- **Instances 4-5** at `0x10ff09b98`/`0x10ff09ba8`: have fields reading as
-  strings `"_count"`, `"_entries"`, `"_freeList"`, `"_buckets"` — **they're
-  actually Dictionary internal field-name string literals** that happened to
-  land at addresses whose first 8 bytes equal `cpr_class`.
-
-**The real instances must be inside a container** — probably Arena has a
-`Dictionary<int, CardPrintingRecord*>` or similar. To find it, scan for a
-dictionary with these properties:
-
-- `hash == key` at the standard Dictionary<int,V> layout (hash at +0, key at
-  +8 of each entry)
-- Entry stride `24` bytes (not 16) because the value is an 8-byte pointer,
-  plus 4 bytes alignment padding between `key` (int, 4 bytes) and `value`
-  (ptr, 8 bytes)
-- `count` around **17,000** — roughly how many cards Arena ships with
-- Keys (grp_ids) in the Arena range `[1, 200_000]`
-- Values pointing to objects whose first 8 bytes equal `cpr_class`
-
-Once found, iterate the entries and for each valid (key, value_ptr) pair,
-the value_ptr is a real `CardPrintingRecord*`. Read the fields we care about
-(`GrpId`, `ExpansionCode`, `CollectorNumber` — or `TitleId` if going the
-localization-table route).
-
-### Improving static field reading (alternative approach)
-
-If we wanted to fix the broken `papa._instance` read instead of
-bypassing it, some ideas that haven't been explored:
-
-1. **Dump the raw bytes of the `Il2CppClass` struct for PAPA** and compare
-   against the layout our code assumes (`CLASS_STATIC_FIELDS` at `0xA8`).
-   Look for another pointer field nearby that might be the GC-tracked static
-   area.
-2. **Cross-reference against the actual IL2CPP source** at
-   `https://github.com/Unity-Technologies/il2cpp` or similar. The `Il2CppClass`
-   struct layout is public, but it varies by Unity version.
-3. **Use `il2cpp-dumper`** or `Il2CppInspector` against Arena's
-   `GameAssembly.dylib` to get a definitive dump of every class's metadata.
-   Those tools are open source and specifically target reverse-engineering
-   IL2CPP binaries. They'd tell us exactly what offset `static_fields` is at
-   and whether there's a separate GC-static-fields pointer.
+The approach that actually works: heap-scan for a `Dictionary<int, T>`
+object whose entries have the `Dictionary<int, V>.Entry` layout **with
+stride 24** (`hash + next + key + padding + 8-byte value pointer`), whose
+`count` field is in the Arena card-database range (`5_000–100_000`), and
+whose sampled entry value pointers dereference to objects of a known
+card-printing class name. This is `scan_heap_for_card_printing_dictionary`
+in `src/napi/mod.rs` — see the `readMtgaCardDatabase` update subsection
+for the detailed walk-through.
 
 ## Resume / rebuild instructions
 

@@ -81,5 +81,45 @@ export declare function readData(processName: string, fields: Array<string>): an
  * objects on success, or `{ "error": string }` on any failure.
  */
 export declare function readMtgaCards(processName: string): any
+/**
+ * Inventory reader. Returns the current player's wildcard counts
+ * plus currency and vault progress, read directly from the
+ * `ClientPlayerInventory` singleton in Arena's memory.
+ *
+ * Returns `{ wcCommon, wcUncommon, wcRare, wcMythic, gold, gems,
+ * vaultProgress }` on success, `{ error }` on failure.
+ *
+ * `vaultProgress` is a number in `0.0 – 100.0` matching Arena's UI
+ * exactly (e.g. `58.9` when the UI shows "Vault: 58.9%"). The raw
+ * field is stored as an 8-byte `double` in the C# class, not an
+ * int — NOTES / IL2CPP_RESEARCH_SUMMARY.md were wrong about this.
+ *
+ * Set `MTGA_DEBUG_INVENTORY=1` for verbose stderr diagnostics (class
+ * location, field dump, candidate counts).
+ */
+export declare function readMtgaInventory(processName: string): any
+/**
+ * Card-database reader. Walks PAPA → CardDatabase → printing
+ * dictionary and returns, for every `CardPrintingRecord` in the
+ * running Arena process, the tuple
+ * `{ grpId, set, collectorNumber, titleId }`.
+ *
+ * Callers combine this with `readMtgaCards` (the collection dict
+ * reader) and either (a) look up each `(set, collectorNumber)` via
+ * Scryfall's `/cards/{set}/{number}` endpoint — which returns
+ * cards even when `arena_id` is null — or (b) walk the localization
+ * table using `titleId` for a fully offline name lookup.
+ */
+export declare function readMtgaCardDatabase(processName: string): any
+/**
+ * Mono-backend card-collection reader. Targets Arena processes running
+ * the Mono scripting backend (Windows native or Wine). Pass the process
+ * name or path fragment (e.g. "MTGA.exe" for Wine).
+ */
+export declare function readMtgaCardsMono(processName: string): any
+/** Mono-backend card-database reader. */
+export declare function readMtgaCardDatabaseMono(processName: string): any
+/** Mono-backend inventory reader. */
+export declare function readMtgaInventoryMono(processName: string): any
 export declare function readClass(processName: string, address: number): any
 export declare function readGenericInstance(processName: string, address: number): any

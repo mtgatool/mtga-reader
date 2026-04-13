@@ -1201,6 +1201,148 @@ mod macos_backend {
         matched
     }
 
+    /// Enumerate all `Il2CppClass*` addresses in `__DATA` whose
+    /// class-name field **contains** the given substring. Useful
+    /// for discovery — e.g. `"Inventory"` will surface
+    /// `ClientPlayerInventory`, `AwsInventoryServiceWrapper`,
+    /// `InventoryManager`, etc. Returns `(class_ptr, class_name)`
+    /// pairs.
+    fn find_classes_by_name_substr(
+        reader: &MemReader,
+        pid: u32,
+        substr: &str,
+    ) -> Vec<(usize, String)> {
+        use std::collections::HashSet;
+        const MIN_PTR: usize = 0x1_0000_0000;
+        const MAX_PTR: usize = 0x2_0000_0000;
+        let segments = find_all_data_segments(pid);
+        let mut seen: HashSet<usize> = HashSet::new();
+        let mut matches: Vec<(usize, String)> = Vec::new();
+        for (seg_start, seg_end) in segments {
+            let size = seg_end - seg_start;
+            let buf = reader.read_bytes(seg_start, size);
+            if buf.len() != size {
+                continue;
+            }
+            for i in 0..size / 8 {
+                let off = i * 8;
+                let p = u64::from_le_bytes(buf[off..off + 8].try_into().unwrap_or([0; 8]))
+                    as usize;
+                if p < MIN_PTR || p > MAX_PTR || !seen.insert(p) {
+                    continue;
+                }
+                let name_ptr = reader.read_ptr(p + offsets::CLASS_NAME);
+                if name_ptr < MIN_PTR || name_ptr > MAX_PTR {
+                    continue;
+                }
+                let class_name = reader.read_string(name_ptr);
+                if class_name.is_empty() || class_name.len() > 128 {
+                    continue;
+                }
+                if class_name.contains(substr) {
+                    matches.push((p, class_name));
+                }
+            }
+        }
+        matches
+    }
+
+    /// Count how many 8-byte-aligned occurrences of `target` exist
+    /// in the scannable heap regions. Diagnostic helper for
+    /// confirming whether a given class pointer is even referenced
+    /// anywhere in the heap we're scanning.
+    fn count_pointer_occurrences_in_heap(
+        reader: &MemReader,
+        pid: u32,
+        target: usize,
+    ) -> (usize, Vec<usize>) {
+        // Returns (count, first_few_addresses).
+        let regions = find_scannable_heap_regions(pid);
+        let mut count = 0usize;
+        let mut sample: Vec<usize> = Vec::new();
+        for (start, end) in regions {
+            let size = end - start;
+            let buf = reader.read_bytes(start, size);
+            if buf.len() != size {
+                continue;
+            }
+            let slot_count = size / 8;
+            for i in 0..slot_count {
+                let off = i * 8;
+                let p = u64::from_le_bytes(buf[off..off + 8].try_into().unwrap_or([0; 8]))
+                    as usize;
+                if p == target {
+                    count += 1;
+                    if sample.len() < 10 {
+                        sample.push(start + off);
+                    }
+                }
+            }
+        }
+        (count, sample)
+    }
+
+    /// Enumerate ALL `Il2CppClass*` addresses in `__DATA` whose
+    /// class-name field matches the given name. `find_class_by_direct_scan`
+    /// returns the first match, but IL2CPP often keeps multiple
+    /// `Il2CppClass` structs for the same logical type (metadata
+    /// table entry + one or more runtime vtable owners) at different
+    /// addresses. For heap-scan use cases we need all of them so the
+    /// instance filter accepts whichever variant the GC-managed
+    /// objects actually reference.
+    fn find_all_classes_by_name(
+        reader: &MemReader,
+        pid: u32,
+        name: &str,
+    ) -> Vec<usize> {
+        use std::collections::HashSet;
+        const MIN_PTR: usize = 0x1_0000_0000;
+        const MAX_PTR: usize = 0x2_0000_0000;
+
+        let segments = find_all_data_segments(pid);
+        let mut seen: HashSet<usize> = HashSet::new();
+        let mut matches: Vec<usize> = Vec::new();
+
+        for (seg_start, seg_end) in segments {
+            let size = seg_end - seg_start;
+            let buf = reader.read_bytes(seg_start, size);
+            if buf.len() != size {
+                continue;
+            }
+            let slot_count = size / 8;
+            for i in 0..slot_count {
+                let off = i * 8;
+                let p = u64::from_le_bytes(buf[off..off + 8].try_into().unwrap_or([0; 8]))
+                    as usize;
+                if p < MIN_PTR || p > MAX_PTR {
+                    continue;
+                }
+                if !seen.insert(p) {
+                    continue;
+                }
+                let name_ptr = reader.read_ptr(p + offsets::CLASS_NAME);
+                if name_ptr < MIN_PTR || name_ptr > MAX_PTR {
+                    continue;
+                }
+                let class_name = reader.read_string(name_ptr);
+                if class_name.is_empty() || class_name.len() > 128 {
+                    continue;
+                }
+                if class_name == name {
+                    matches.push(p);
+                }
+            }
+        }
+        if std::env::var("MTGA_DEBUG_INVENTORY").is_ok() {
+            eprintln!(
+                "find_all_classes_by_name: target={:?}, matches={}",
+                name,
+                matches.len(),
+            );
+        }
+        matches
+    }
+
     pub fn read_class_name(reader: &MemReader, class: usize) -> String {
         if class == 0 || class < 0x100000 {
             return String::new();
@@ -1821,6 +1963,1231 @@ mod macos_backend {
             skipped_out_of_range,
         );
         entries
+    }
+
+    /// Read an IL2CPP managed string (`Il2CppString`) from memory.
+    ///
+    /// Layout on macOS arm64 (matches `src/il2cpp/reader.rs`
+    /// `read_managed_string`):
+    ///
+    /// ```text
+    /// +0x00  klass pointer
+    /// +0x08  monitor pointer
+    /// +0x10  length (i32)
+    /// +0x14  chars[] (UTF-16, `length` code units)
+    /// ```
+    ///
+    /// Returns `None` on null pointer, implausible length, or invalid
+    /// UTF-16 sequence. The `MAX_LEN` cap (1024 code units) exists
+    /// because a heap pointer that coincidentally has int bytes at
+    /// +0x10 can decode as a giant "length" that would hang the
+    /// reader; anything plausibly a card field (set code, collector
+    /// number, short text) fits well under 1024.
+    fn read_il2cpp_string(reader: &MemReader, ptr: usize) -> Option<String> {
+        const MAX_LEN: i32 = 1024;
+        if ptr < 0x100000 {
+            return None;
+        }
+        let length = reader.read_i32(ptr + 0x10);
+        if length < 0 || length > MAX_LEN {
+            return None;
+        }
+        if length == 0 {
+            return Some(String::new());
+        }
+        let bytes = reader.read_bytes(ptr + 0x14, length as usize * 2);
+        if bytes.len() < length as usize * 2 {
+            return None;
+        }
+        let mut chars: Vec<u16> = Vec::with_capacity(length as usize);
+        for i in 0..length as usize {
+            chars.push(u16::from_le_bytes([bytes[i * 2], bytes[i * 2 + 1]]));
+        }
+        String::from_utf16(&chars).ok()
+    }
+
+    /// Runtime-resolved field offsets on the class that the
+    /// card-printing dictionary actually holds. On current MTGA
+    /// builds this is `CardPrintingData`, which stores its data as
+    /// an **inlined `CardPrintingRecord` struct** at the `Record`
+    /// field (offset 0xC0 at time of writing). On earlier builds
+    /// it may be `CardPrintingRecord` directly.
+    ///
+    /// We read CardPrintingRecord's field offsets from its Il2CppClass
+    /// (the authoritative source) and then bias them by the
+    /// `Record`-field offset on the runtime value class. This keeps
+    /// us robust to Arena adding or reordering fields around the
+    /// embedded struct.
+    #[derive(Debug, Clone)]
+    struct RuntimeCardFieldOffsets {
+        grp_id: usize,
+        title_id: usize,
+        expansion_code: usize,
+        collector_number: usize,
+    }
+
+    fn resolve_runtime_card_field_offsets(
+        reader: &MemReader,
+        runtime_value_class: usize,
+        cpr_class: usize,
+    ) -> Option<RuntimeCardFieldOffsets> {
+        // Authoritative offsets from the CardPrintingRecord class.
+        // These are the field offsets *within* the record struct.
+        let cpr_fields = get_class_fields(reader, cpr_class);
+        let cpr_find = |name: &str| -> Option<usize> {
+            cpr_fields
+                .iter()
+                .find(|f| !f.is_static && f.name == name)
+                .map(|f| f.offset as usize)
+        };
+        let cpr_grp_id = cpr_find("GrpId")?;
+        let cpr_title_id = cpr_find("TitleId")?;
+        let cpr_expansion = cpr_find("ExpansionCode")?;
+        let cpr_collector = cpr_find("CollectorNumber")?;
+        let debug = std::env::var("MTGA_DEBUG_CARD_DB").is_ok();
+        if debug {
+            eprintln!(
+                "resolve_runtime_card_field_offsets: cpr_class fields GrpId@0x{:x} TitleId@0x{:x} ExpansionCode@0x{:x} CollectorNumber@0x{:x}",
+                cpr_grp_id, cpr_title_id, cpr_expansion, cpr_collector,
+            );
+        }
+
+        // Figure out where the CardPrintingRecord data lives on the
+        // runtime value object:
+        //
+        // - If the runtime class IS CardPrintingRecord (ie. the dict
+        //   value is a reference-typed CardPrintingRecord object),
+        //   the class's own field offsets are already absolute on
+        //   the instance (they include the 16-byte Il2CppObject
+        //   header). We use them directly.
+        //
+        // - If the runtime class is a wrapper like CardPrintingData
+        //   that embeds a CardPrintingRecord **as a value-type
+        //   struct** at some `Record` field, we need to combine the
+        //   Record field's offset on the wrapper with the fields'
+        //   offsets inside the struct. Critically, when a class is
+        //   embedded as a struct there is NO Il2CppObject header
+        //   prepended, so we have to subtract the 16-byte header
+        //   adjustment from each CardPrintingRecord field offset
+        //   before adding the Record offset.
+        const IL2CPP_OBJECT_HEADER: usize = 0x10;
+        let runtime_name = read_class_name(reader, runtime_value_class);
+        if runtime_name == "CardPrintingRecord" {
+            return Some(RuntimeCardFieldOffsets {
+                grp_id: cpr_grp_id,
+                title_id: cpr_title_id,
+                expansion_code: cpr_expansion,
+                collector_number: cpr_collector,
+            });
+        }
+
+        let runtime_fields = get_class_fields(reader, runtime_value_class);
+        let rec = runtime_fields.iter().find(|f| {
+            !f.is_static
+                && (f.name == "Record"
+                    || f.name == "<Record>k__BackingField"
+                    || f.name == "_record"
+                    || f.name == "printingRecord"
+                    || f.name == "<PrintingRecord>k__BackingField")
+        })?;
+        let record_offset = rec.offset as usize;
+        if debug {
+            eprintln!(
+                "resolve_runtime_card_field_offsets: {} has Record field at 0x{:x} (treating as embedded struct)",
+                runtime_name, record_offset,
+            );
+        }
+
+        let adjust = |class_field_offset: usize| -> usize {
+            // Strip the Il2CppObject header adjustment from the
+            // class-level field offset (16 bytes), then rebase to
+            // the struct's location on the wrapper.
+            record_offset + class_field_offset.saturating_sub(IL2CPP_OBJECT_HEADER)
+        };
+        Some(RuntimeCardFieldOffsets {
+            grp_id: adjust(cpr_grp_id),
+            title_id: adjust(cpr_title_id),
+            expansion_code: adjust(cpr_expansion),
+            collector_number: adjust(cpr_collector),
+        })
+    }
+
+    /// Find a PAPA-instance field pointing to a `CardDatabase` and
+    /// return the dereferenced instance pointer plus the class pointer
+    /// stored at its +0 header slot.
+    ///
+    /// We re-use the existing `find_papa_instance` walker (which
+    /// handles the heap scan + InventoryManager cross-verification
+    /// that makes the PAPA singleton findable on current Arena builds)
+    /// and then look up CardDatabase in PAPA's field list by name.
+    /// Both direct `CardDatabase` and property-backing
+    /// `<CardDatabase>k__BackingField` names are accepted so we
+    /// survive C# source changes that add or remove a property
+    /// wrapper.
+    fn find_card_database_instance(
+        reader: &MemReader,
+        pid: u32,
+    ) -> Option<(usize, usize)> {
+        let papa_class = find_class_by_direct_scan(reader, pid, "PAPA")?;
+        eprintln!(
+            "find_card_database_instance: PAPA class = 0x{:x}",
+            papa_class,
+        );
+        let papa_instance = find_papa_instance(reader, pid, papa_class)?;
+        eprintln!(
+            "find_card_database_instance: PAPA instance = 0x{:x}",
+            papa_instance,
+        );
+
+        let papa_fields = get_class_fields(reader, papa_class);
+        let cd_field = papa_fields.iter().find(|f| {
+            !f.is_static
+                && (f.name == "CardDatabase"
+                    || f.name == "_cardDatabase"
+                    || f.name == "<CardDatabase>k__BackingField"
+                    || f.type_name == "CardDatabase")
+        });
+        let cd_field = match cd_field {
+            Some(f) => f,
+            None => {
+                eprintln!(
+                    "find_card_database_instance: PAPA has no CardDatabase-like field. PAPA non-static fields:",
+                );
+                for f in &papa_fields {
+                    if !f.is_static {
+                        eprintln!(
+                            "  {:?} @ 0x{:x} (type: {})",
+                            f.name, f.offset, f.type_name,
+                        );
+                    }
+                }
+                return None;
+            }
+        };
+        eprintln!(
+            "find_card_database_instance: using PAPA.{:?} @ 0x{:x} (type: {})",
+            cd_field.name, cd_field.offset, cd_field.type_name,
+        );
+
+        let cd_instance = reader.read_ptr(papa_instance + cd_field.offset as usize);
+        if cd_instance < 0x100000 {
+            eprintln!(
+                "find_card_database_instance: CardDatabase field value = 0x{:x} (invalid)",
+                cd_instance,
+            );
+            return None;
+        }
+        let cd_class = reader.read_ptr(cd_instance);
+        eprintln!(
+            "find_card_database_instance: CardDatabase instance = 0x{:x}, class = 0x{:x}",
+            cd_instance, cd_class,
+        );
+        Some((cd_instance, cd_class))
+    }
+
+    /// Walk `CardDatabase`'s non-static fields looking for a
+    /// `Dictionary<int, CardPrintingRecord*>`-shaped object.
+    ///
+    /// The CardDatabase class type isn't hardcoded — we read
+    /// whichever class the instance claims to be (obj +0) and
+    /// enumerate its fields. For each field that dereferences to a
+    /// plausible object, we check if the object has the documented
+    /// .NET Dictionary header layout (`buckets_ptr`, `entries_ptr`,
+    /// `count` at +0x10/+0x18/+0x20) with a count in the Arena card
+    /// range (~17k) and sample a few entries at **stride 24** (the
+    /// correct stride for `Dictionary<int, TValue>` where `TValue` is
+    /// pointer-sized: 4-byte `hashCode` + 4-byte `next` + 4-byte
+    /// `key` + 4-byte padding + 8-byte pointer value = 24). We
+    /// validate the value pointer at entry +0x10 dereferences to
+    /// `cpr_class` to lock onto the right dict.
+    ///
+    /// Returns (dict_addr, count) or None.
+    fn find_card_printing_dictionary(
+        reader: &MemReader,
+        cd_instance: usize,
+        cd_class: usize,
+        cpr_class: usize,
+    ) -> Option<(usize, i32)> {
+        const MIN_COUNT: i32 = 1_000;
+        const MAX_COUNT: i32 = 100_000;
+        const MIN_CPR_HITS: usize = 5;
+
+        let fields = get_class_fields(reader, cd_class);
+        let cd_class_name = read_class_name(reader, cd_class);
+        eprintln!(
+            "find_card_printing_dictionary: class {:?} (0x{:x}) has {} fields",
+            cd_class_name, cd_class, fields.len(),
+        );
+
+        for f in &fields {
+            if f.is_static {
+                continue;
+            }
+            let field_addr = cd_instance + f.offset as usize;
+            let field_val = reader.read_ptr(field_addr);
+            if field_val < 0x100000 {
+                continue;
+            }
+            let count = reader.read_i32(field_val + 0x20);
+            if count < MIN_COUNT || count > MAX_COUNT {
+                continue;
+            }
+            let entries_ptr = reader.read_ptr(field_val + 0x18);
+            if entries_ptr < 0x100000 {
+                continue;
+            }
+
+            // Sample first 30 entries at stride 24 and count how many
+            // have (hash == key), an Arena-range key, and a value
+            // pointer whose class == cpr_class.
+            let mut cpr_hits = 0usize;
+            let mut sampled_non_empty = 0usize;
+            for i in 0..30usize {
+                let entry_addr = entries_ptr + 0x20 + i * 24;
+                let hash = reader.read_i32(entry_addr);
+                if hash == -1 {
+                    continue;
+                }
+                sampled_non_empty += 1;
+                let key = reader.read_i32(entry_addr + 8);
+                if hash != key || key < 1 || key > 200_000 {
+                    continue;
+                }
+                let value_ptr = reader.read_ptr(entry_addr + 16);
+                if value_ptr < 0x100000 {
+                    continue;
+                }
+                let obj_class = reader.read_ptr(value_ptr);
+                if obj_class == cpr_class {
+                    cpr_hits += 1;
+                }
+            }
+            eprintln!(
+                "  field {:?}: ptr=0x{:x} entries=0x{:x} count={} sampled={} cpr_hits={}",
+                f.name, field_val, entries_ptr, count, sampled_non_empty, cpr_hits,
+            );
+            if cpr_hits >= MIN_CPR_HITS {
+                eprintln!(
+                    "find_card_printing_dictionary: SELECTED field {:?} dict=0x{:x} count={}",
+                    f.name, field_val, count,
+                );
+                return Some((field_val, count));
+            }
+        }
+
+        // Field-level search failed. As a fallback, treat the
+        // instance itself as a Dictionary-shaped object (CardDatabase
+        // might BE a dictionary subclass rather than contain one).
+        let self_count = reader.read_i32(cd_instance + 0x20);
+        if self_count >= MIN_COUNT && self_count <= MAX_COUNT {
+            let self_entries = reader.read_ptr(cd_instance + 0x18);
+            if self_entries >= 0x100000 {
+                let mut cpr_hits = 0usize;
+                for i in 0..30usize {
+                    let entry_addr = self_entries + 0x20 + i * 24;
+                    let hash = reader.read_i32(entry_addr);
+                    if hash == -1 {
+                        continue;
+                    }
+                    let key = reader.read_i32(entry_addr + 8);
+                    if hash != key || key < 1 || key > 200_000 {
+                        continue;
+                    }
+                    let value_ptr = reader.read_ptr(entry_addr + 16);
+                    if value_ptr < 0x100000 {
+                        continue;
+                    }
+                    if reader.read_ptr(value_ptr) == cpr_class {
+                        cpr_hits += 1;
+                    }
+                }
+                if cpr_hits >= MIN_CPR_HITS {
+                    eprintln!(
+                        "find_card_printing_dictionary: SELECTED cd_instance as dict 0x{:x} count={}",
+                        cd_instance, self_count,
+                    );
+                    return Some((cd_instance, self_count));
+                }
+            }
+        }
+        None
+    }
+
+    /// Heap-scan for a `Dictionary<int, CardPrintingRecord*>` anywhere
+    /// in Arena's memory. Bypasses the PAPA walker entirely — this is
+    /// the same strategy that makes `scan_heap_for_cards_dictionary`
+    /// robust against PAPA singleton drift.
+    ///
+    /// Signal stack:
+    /// - Dictionary header shape at candidate address: `buckets_ptr`,
+    ///   `entries_ptr`, `count` at +0x10 / +0x18 / +0x20.
+    /// - `count` in `[MIN_COUNT, MAX_COUNT]` — Arena currently ships
+    ///   ~17k cards; we allow `[5_000, 100_000]` for slack.
+    /// - Sample first `SAMPLE_ENTRIES` entries at **stride 24**
+    ///   (`Dictionary<int, TRefValue>` pads `key` to 8 bytes before the
+    ///   pointer value). Each entry layout:
+    ///   `hash(4) + next(4) + key(4) + pad(4) + value_ptr(8)`.
+    /// - For every non-empty sampled entry require `hash == key`,
+    ///   `key` in Arena range `[1, 200_000]`, and
+    ///   `read_ptr(value_ptr) == cpr_class` (the decisive signal: no
+    ///   random heap region has this many pointers that all
+    ///   dereference to the same CardPrintingRecord class).
+    ///
+    /// Returns `(dict_addr, declared_count)` for the best-scoring
+    /// candidate, or None.
+    fn scan_heap_for_card_printing_dictionary(
+        reader: &MemReader,
+        pid: u32,
+        cpr_class_hint: usize,
+    ) -> Option<(usize, i32, usize)> {
+        // Returns (dict_addr, declared_count, runtime_value_class).
+        // The third value is the class pointer observed on
+        // heap-resident dict values. On current Arena builds this is
+        // the `CardPrintingData` wrapper class, NOT the metadata
+        // `CardPrintingRecord` class that `cpr_class_hint` refers
+        // to — IL2CPP keeps those separate. The caller uses this
+        // returned pointer to filter valid entries and to look up
+        // the wrapper's field layout.
+        const MIN_COUNT: i32 = 5_000;
+        const MAX_COUNT: i32 = 100_000;
+        const MIN_PTR: usize = 0x1_0000_0000;
+        const MAX_PTR: usize = 0x4_0000_0000;
+        const SAMPLE_ENTRIES: usize = 30;
+        const MIN_HASH_KEY_MATCHES: usize = 10;
+
+        let debug = std::env::var("MTGA_DEBUG_CARD_DB").is_ok();
+        let heap_regions = find_scannable_heap_regions(pid);
+        if debug {
+            eprintln!(
+                "scan_heap_for_card_printing_dictionary: scanning {} heap regions (count in [{}, {}], stride=24)",
+                heap_regions.len(), MIN_COUNT, MAX_COUNT,
+            );
+        }
+
+        // Pass 1: collect every dict-header candidate whose sampled
+        // entries match the `Dictionary<int, TValue>` hash==key
+        // invariant and point to a non-null object. Keep the observed
+        // class pointer of the first valid value so Pass 2 can
+        // resolve it by name.
+        let mut candidates: Vec<(usize, i32, usize, usize)> = Vec::new();
+        // (dict_addr, declared_count, hash_key_matches, first_value_class_ptr)
+        let mut candidates_examined = 0usize;
+
+        for (start, end) in heap_regions {
+            let size = end - start;
+            let buf = reader.read_bytes(start, size);
+            if buf.len() != size {
+                continue;
+            }
+            let slot_count = size / 8;
+            let mut i = 0;
+            while i + 5 < slot_count {
+                let base = i * 8;
+                let buckets_ptr = u64::from_le_bytes(
+                    buf[base + 0x10..base + 0x18].try_into().unwrap_or([0; 8]),
+                ) as usize;
+                let entries_ptr = u64::from_le_bytes(
+                    buf[base + 0x18..base + 0x20].try_into().unwrap_or([0; 8]),
+                ) as usize;
+                let count = i32::from_le_bytes(
+                    buf[base + 0x20..base + 0x24].try_into().unwrap_or([0; 4]),
+                );
+                if count < MIN_COUNT
+                    || count > MAX_COUNT
+                    || buckets_ptr < MIN_PTR
+                    || buckets_ptr > MAX_PTR
+                    || entries_ptr < MIN_PTR
+                    || entries_ptr > MAX_PTR
+                {
+                    i += 1;
+                    continue;
+                }
+                candidates_examined += 1;
+
+                let mut hash_key_matches = 0usize;
+                let mut first_value_class: usize = 0;
+                for entry_idx in 0..SAMPLE_ENTRIES {
+                    let entry_addr = entries_ptr + 0x20 + entry_idx * 24;
+                    let entry_bytes = reader.read_bytes(entry_addr, 24);
+                    if entry_bytes.len() != 24 {
+                        break;
+                    }
+                    let hash = i32::from_le_bytes(
+                        entry_bytes[0..4].try_into().unwrap_or([0; 4]),
+                    );
+                    if hash == -1 {
+                        continue;
+                    }
+                    let key = i32::from_le_bytes(
+                        entry_bytes[8..12].try_into().unwrap_or([0; 4]),
+                    );
+                    if hash != key || key < 1 || key > 200_000 {
+                        continue;
+                    }
+                    hash_key_matches += 1;
+                    if first_value_class == 0 {
+                        let value_ptr = u64::from_le_bytes(
+                            entry_bytes[16..24].try_into().unwrap_or([0; 8]),
+                        ) as usize;
+                        if value_ptr >= MIN_PTR && value_ptr <= MAX_PTR {
+                            let c = reader.read_ptr(value_ptr);
+                            if c >= MIN_PTR && c <= MAX_PTR {
+                                first_value_class = c;
+                            }
+                        }
+                    }
+                }
+                if hash_key_matches >= MIN_HASH_KEY_MATCHES && first_value_class != 0 {
+                    let dict_addr = start + base;
+                    candidates.push((dict_addr, count, hash_key_matches, first_value_class));
+                }
+                i += 1;
+            }
+        }
+
+        if debug {
+            eprintln!(
+                "scan_heap_for_card_printing_dictionary: {} pre-filter candidates, {} passed hash==key + nonnull-value filter",
+                candidates_examined, candidates.len(),
+            );
+        }
+
+        // Pass 2: resolve each unique observed class pointer to its
+        // name. The dict whose entries point to objects of class
+        // named "CardPrintingRecord" is the one we want. This is the
+        // `IL2CPP variant` workaround: we don't require the class
+        // pointer to equal `cpr_class_hint`; we only require the name
+        // to match.
+        let mut unique_classes: std::collections::HashMap<usize, String> =
+            std::collections::HashMap::new();
+        for (_, _, _, class_ptr) in &candidates {
+            unique_classes
+                .entry(*class_ptr)
+                .or_insert_with(|| read_class_name(reader, *class_ptr));
+        }
+        if debug {
+            eprintln!(
+                "scan_heap_for_card_printing_dictionary: {} unique value-class pointers observed:",
+                unique_classes.len(),
+            );
+            for (class_ptr, name) in &unique_classes {
+                eprintln!("  0x{:x} -> {:?}", class_ptr, name);
+            }
+        }
+
+        // Find the runtime class pointer(s) whose name matches the
+        // card-printing class family. Accepted names:
+        //  - "CardPrintingRecord" (what NOTES describes)
+        //  - "CardPrintingData" (the actual runtime class on current
+        //    MTGA builds — thin wrapper whose internal layout we
+        //    discover in the diagnostic dump below)
+        let accepted_names = ["CardPrintingData", "CardPrintingRecord"];
+        let cpr_runtime_classes: std::collections::HashSet<usize> = unique_classes
+            .iter()
+            .filter_map(|(c, n)| {
+                if accepted_names.iter().any(|a| *a == n.as_str()) {
+                    Some(*c)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if cpr_runtime_classes.is_empty() {
+            // Unconditional — this is a failure mode the caller
+            // surfaces as an error, so the explanation belongs in
+            // the log regardless of debug mode.
+            eprintln!(
+                "scan_heap_for_card_printing_dictionary: no candidate value-class resolved to a known card-printing class name (metadata-variant class_ptr was 0x{:x})",
+                cpr_class_hint,
+            );
+            return None;
+        }
+
+        // Retain candidates whose first_value_class is in the set.
+        let mut winners: Vec<(usize, i32, usize, usize)> = candidates
+            .into_iter()
+            .filter(|(_, _, _, c)| cpr_runtime_classes.contains(c))
+            .collect();
+        winners.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| b.1.cmp(&a.1)));
+        if debug {
+            eprintln!(
+                "scan_heap_for_card_printing_dictionary: {} candidate dicts with card-printing values",
+                winners.len(),
+            );
+            for (idx, (addr, count, hits, class_ptr)) in winners.iter().take(5).enumerate() {
+                eprintln!(
+                    "  [{}] 0x{:x} count={} hash_key_matches={} class=0x{:x}",
+                    idx, addr, count, hits, class_ptr,
+                );
+            }
+        }
+        winners
+            .first()
+            .map(|(addr, count, _, class_ptr)| (*addr, *count, *class_ptr))
+    }
+
+    /// Walk a `Dictionary<int, CardPrintingRecord*>` and return
+    /// `(grp_id, cpr_ptr)` pairs. Entry stride is **24 bytes**
+    /// (padding between the 4-byte int key and the 8-byte pointer
+    /// value), NOT 16 like `Dictionary<int, int>`.
+    fn read_card_printing_entries(
+        reader: &MemReader,
+        dict_addr: usize,
+        cpr_class: usize,
+    ) -> Vec<(i32, usize)> {
+        let entries_ptr = reader.read_ptr(dict_addr + 0x18);
+        let count = reader.read_i32(dict_addr + 0x20);
+        if entries_ptr < 0x100000 || count <= 0 {
+            return Vec::new();
+        }
+        let mut result = Vec::with_capacity(count as usize);
+        let mut skipped_empty = 0usize;
+        let mut skipped_hash = 0usize;
+        let mut skipped_range = 0usize;
+        let mut skipped_class = 0usize;
+        for i in 0..count.min(100_000) as usize {
+            let entry_addr = entries_ptr + 0x20 + i * 24;
+            let hash = reader.read_i32(entry_addr);
+            if hash == -1 {
+                skipped_empty += 1;
+                continue;
+            }
+            let key = reader.read_i32(entry_addr + 8);
+            if hash != key {
+                skipped_hash += 1;
+                continue;
+            }
+            if key < 1 || key > 200_000 {
+                skipped_range += 1;
+                continue;
+            }
+            let value_ptr = reader.read_ptr(entry_addr + 16);
+            if value_ptr < 0x100000 {
+                skipped_class += 1;
+                continue;
+            }
+            if reader.read_ptr(value_ptr) != cpr_class {
+                skipped_class += 1;
+                continue;
+            }
+            result.push((key, value_ptr));
+        }
+        if std::env::var("MTGA_DEBUG_CARD_DB").is_ok() {
+            eprintln!(
+                "read_card_printing_entries: count={} kept={} skipped(empty={}, hash!=key={}, out_of_range={}, bad_class={})",
+                count, result.len(), skipped_empty, skipped_hash, skipped_range, skipped_class,
+            );
+        }
+        result
+    }
+
+    /// Public entry point for the card database reader. Walks
+    /// PAPA → CardDatabase → printing dict and returns
+    /// `(grp_id, expansion_code, collector_number, title_id)` tuples.
+    /// Callers can use `(expansion_code, collector_number)` to query
+    /// Scryfall by set+number even for cards where Scryfall's
+    /// `arena_id` is null (recent Alchemy / Universes Beyond sets).
+    pub fn read_mtga_card_database_impl(
+        process_name: &str,
+    ) -> Result<Vec<(i32, String, String, i32)>> {
+        // Gate verbose diagnostics (field dumps, byte hexdump of the
+        // first entry) behind an env var so production callers get
+        // clean output. Set `MTGA_DEBUG_CARD_DB=1` while investigating
+        // layout drift on a new Arena build.
+        let debug = std::env::var("MTGA_DEBUG_CARD_DB").is_ok();
+
+        let pid = find_pid_by_name(process_name)
+            .ok_or_else(|| Error::from_reason(format!("Process '{}' not found", process_name)))?;
+        let reader = MemReader::new(pid);
+
+        let cpr_class = find_class_by_direct_scan(&reader, pid, "CardPrintingRecord")
+            .ok_or_else(|| {
+                Error::from_reason(
+                    "CardPrintingRecord class not found via direct __DATA scan. \
+                     Either MTGA isn't fully loaded or the class has been renamed.",
+                )
+            })?;
+        if debug {
+            eprintln!(
+                "read_mtga_card_database_impl: cpr_class = 0x{:x}",
+                cpr_class,
+            );
+        }
+
+        // Primary strategy: heap-scan for the printing dictionary
+        // directly. Bypasses the PAPA singleton walker, which has
+        // historically been fragile on current Arena builds (see the
+        // long comment in `find_papa_instance`). The signature
+        // scan — `Dictionary<int, ptr>` where value_ptr dereferences
+        // to an object with class name in
+        // {CardPrintingData, CardPrintingRecord}, with ~17k entries
+        // — is astronomically unique.
+        let (dict_addr, dict_count, runtime_value_class) =
+            scan_heap_for_card_printing_dictionary(&reader, pid, cpr_class).ok_or_else(|| {
+                Error::from_reason(
+                    "Could not find a card-printing dictionary in Arena's heap. \
+                     The signature scan examined every dict-shaped object with \
+                     a count in the expected card-database range but none had \
+                     entries pointing to objects of a known card-printing class. \
+                     Either Arena hasn't finished loading the card database or \
+                     the Dictionary layout has drifted.",
+                )
+            })?;
+        let runtime_value_class_name = read_class_name(&reader, runtime_value_class);
+        if debug {
+            eprintln!(
+                "read_mtga_card_database_impl: dict 0x{:x} declared_count={} runtime_value_class=0x{:x} ({:?})",
+                dict_addr, dict_count, runtime_value_class, runtime_value_class_name,
+            );
+        }
+
+        // Resolve field offsets. On CardPrintingData, the embedded
+        // CardPrintingRecord struct lives at the `Record` field —
+        // we combine CardPrintingRecord's internal offsets with the
+        // Record field offset to get absolute offsets on the
+        // runtime value object.
+        let runtime_cpr_offsets =
+            resolve_runtime_card_field_offsets(&reader, runtime_value_class, cpr_class)
+                .ok_or_else(|| {
+                    Error::from_reason(format!(
+                        "Could not resolve card-printing field offsets on runtime class \
+                         {:?}. CardPrintingRecord fields (GrpId, TitleId, ExpansionCode, \
+                         CollectorNumber) are required, and the runtime class must either \
+                         BE CardPrintingRecord or contain it as a 'Record' field.",
+                        runtime_value_class_name,
+                    ))
+                })?;
+        if debug {
+            eprintln!(
+                "read_mtga_card_database_impl: absolute field offsets grp_id=0x{:x} title_id=0x{:x} expansion_code=0x{:x} collector_number=0x{:x}",
+                runtime_cpr_offsets.grp_id,
+                runtime_cpr_offsets.title_id,
+                runtime_cpr_offsets.expansion_code,
+                runtime_cpr_offsets.collector_number,
+            );
+        }
+
+        let entries = read_card_printing_entries(&reader, dict_addr, runtime_value_class);
+        if entries.is_empty() {
+            return Err(Error::from_reason(format!(
+                "Found CardPrintingRecord dictionary at 0x{:x} but walked zero \
+                 valid entries. Stride-24 layout or hash filter may be wrong.",
+                dict_addr,
+            )));
+        }
+
+        let mut result = Vec::with_capacity(entries.len());
+        let mut string_fail = 0usize;
+        let mut grp_id_mismatches = 0usize;
+        let mut sample_dumped = false;
+        for (grp_id, value_ptr) in &entries {
+            let cpr_grp_id = reader.read_i32(value_ptr + runtime_cpr_offsets.grp_id);
+            if cpr_grp_id != *grp_id {
+                grp_id_mismatches += 1;
+            }
+            // Dump the first entry's raw bytes when debugging. Useful
+            // for verifying the CardPrintingRecord struct layout
+            // after an Arena update shifts offsets.
+            if debug && !sample_dumped {
+                eprintln!(
+                    "read_mtga_card_database_impl: sample entry dict_key={} value_ptr=0x{:x} read_grp_id={}",
+                    grp_id, value_ptr, cpr_grp_id,
+                );
+                let bytes = reader.read_bytes(*value_ptr, 256);
+                eprintln!("  value_ptr bytes[0..256]:");
+                for (ci, c) in bytes.chunks(16).enumerate() {
+                    let hex: Vec<String> = c.iter().map(|b| format!("{:02x}", b)).collect();
+                    eprintln!("    +{:03x}: {}", ci * 16, hex.join(" "));
+                }
+                sample_dumped = true;
+            }
+
+            let title_id = reader.read_i32(value_ptr + runtime_cpr_offsets.title_id);
+            let set_ptr = reader.read_ptr(value_ptr + runtime_cpr_offsets.expansion_code);
+            let num_ptr = reader.read_ptr(value_ptr + runtime_cpr_offsets.collector_number);
+            let set = match read_il2cpp_string(&reader, set_ptr) {
+                Some(s) => s,
+                None => {
+                    string_fail += 1;
+                    String::new()
+                }
+            };
+            let collector_number = match read_il2cpp_string(&reader, num_ptr) {
+                Some(s) => s,
+                None => {
+                    string_fail += 1;
+                    String::new()
+                }
+            };
+            result.push((*grp_id, set, collector_number, title_id));
+        }
+        // These two counters are cheap health signals; leave them
+        // unconditionally on so callers see a surprise without
+        // needing to set an env var.
+        if grp_id_mismatches > 0 {
+            eprintln!(
+                "read_mtga_card_database_impl: WARN {} entries had dict_key != cpr.GrpId — field offset may have drifted",
+                grp_id_mismatches,
+            );
+        }
+        if string_fail > 0 {
+            eprintln!(
+                "read_mtga_card_database_impl: WARN {} string reads returned empty/failed out of {} rows",
+                string_fail, result.len(),
+            );
+        }
+        Ok(result)
+    }
+
+    /// Field offsets on the `ClientPlayerInventory` class, resolved
+    /// at runtime by name via `get_class_fields`.
+    ///
+    /// The C# source's property names are `wcCommon` / `wcUncommon`
+    /// / `wcRare` / `wcMythic` / `gold` / `gems` / `vaultProgress`,
+    /// but Arena's serialized log format sometimes uses
+    /// `WildCardCommons` etc. instead — we try several candidate
+    /// names per logical field and accept the first match.
+    #[derive(Debug, Clone)]
+    struct InventoryFieldOffsets {
+        wc_common: usize,
+        wc_uncommon: usize,
+        wc_rare: usize,
+        wc_mythic: usize,
+        gold: usize,
+        gems: usize,
+        vault_progress: usize,
+    }
+
+    fn resolve_inventory_field_offsets(
+        fields: &[FieldInfo],
+    ) -> Option<InventoryFieldOffsets> {
+        // Try each candidate name in order; first non-static match wins.
+        let find = |candidates: &[&str]| -> Option<usize> {
+            for name in candidates {
+                if let Some(f) = fields.iter().find(|f| !f.is_static && f.name == *name) {
+                    return Some(f.offset as usize);
+                }
+            }
+            None
+        };
+        Some(InventoryFieldOffsets {
+            wc_common: find(&[
+                "wcCommon",
+                "<wcCommon>k__BackingField",
+                "WildCardCommons",
+                "<WildCardCommons>k__BackingField",
+                "_wcCommon",
+            ])?,
+            wc_uncommon: find(&[
+                "wcUncommon",
+                "<wcUncommon>k__BackingField",
+                "WildCardUnCommons",
+                "WildCardUncommons",
+                "<WildCardUnCommons>k__BackingField",
+                "_wcUncommon",
+            ])?,
+            wc_rare: find(&[
+                "wcRare",
+                "<wcRare>k__BackingField",
+                "WildCardRares",
+                "<WildCardRares>k__BackingField",
+                "_wcRare",
+            ])?,
+            wc_mythic: find(&[
+                "wcMythic",
+                "<wcMythic>k__BackingField",
+                "WildCardMythics",
+                "<WildCardMythics>k__BackingField",
+                "_wcMythic",
+            ])?,
+            gold: find(&[
+                "gold",
+                "<gold>k__BackingField",
+                "Gold",
+                "_gold",
+            ])?,
+            gems: find(&[
+                "gems",
+                "<gems>k__BackingField",
+                "Gems",
+                "_gems",
+            ])?,
+            vault_progress: find(&[
+                "vaultProgress",
+                "<vaultProgress>k__BackingField",
+                "VaultProgress",
+                "<VaultProgress>k__BackingField",
+                "_vaultProgress",
+            ])?,
+        })
+    }
+
+    /// Plausibility check on an inventory-shaped object's field
+    /// values. Used during the heap scan to filter candidates.
+    ///
+    /// Range constraints (deliberately generous):
+    /// - Wildcards: `[0, 99_999]` — Untapped Premium accounts can
+    ///   accumulate thousands; allow headroom.
+    /// - Gold: `[0, 10^9]` — nobody actually hits a billion, but
+    ///   int32 max is 2.1B so anything non-negative is plausible.
+    /// - Gems: `[0, 10^7]`
+    /// - VaultProgress: **not range-checked**. Observed live values
+    ///   are `0x33333333 = 858_993_459` which is neither a clean
+    ///   int percentage nor a plausible IEEE float; either the
+    ///   field is stored as a fixed-point representation we don't
+    ///   understand yet or the field is actually 8 bytes (a
+    ///   `double`/`long`) with the low 4 bytes being a poison-like
+    ///   pattern. Field spacing in the class struct
+    ///   (`vaultProgress @ 0x30`, `boosters @ 0x38`) supports the
+    ///   8-byte theory. We report the raw i32 and let callers decide.
+    ///
+    /// Plus a **non-triviality requirement**: at least one of
+    /// {wildcards, gold, gems} must be non-zero. A player logged in
+    /// to Arena has completed the NPE tutorial, which grants gold
+    /// and wildcards; an ALL-ZERO inventory is either uninitialized
+    /// or a metadata false positive. vault_progress is excluded
+    /// from the non-zero check because its encoding is unclear.
+    fn inventory_fields_look_plausible(
+        wc_common: i32,
+        wc_uncommon: i32,
+        wc_rare: i32,
+        wc_mythic: i32,
+        gold: i32,
+        gems: i32,
+        _vault_progress: i32,
+    ) -> bool {
+        let in_range = (0..=99_999).contains(&wc_common)
+            && (0..=99_999).contains(&wc_uncommon)
+            && (0..=99_999).contains(&wc_rare)
+            && (0..=99_999).contains(&wc_mythic)
+            && (0..=1_000_000_000).contains(&gold)
+            && (0..=10_000_000).contains(&gems);
+        if !in_range {
+            return false;
+        }
+        (wc_common | wc_uncommon | wc_rare | wc_mythic | gold | gems) != 0
+    }
+
+    /// Priority score for an inventory candidate. Higher means
+    /// "more like a live, populated inventory." Used to break ties
+    /// when multiple heap slots pass the plausibility filter AND
+    /// have a class that resolves to `ClientPlayerInventory`.
+    /// Excludes vault_progress because its int32 interpretation is
+    /// unreliable.
+    fn inventory_activity_score(
+        wc_common: i32,
+        wc_uncommon: i32,
+        wc_rare: i32,
+        wc_mythic: i32,
+        gold: i32,
+        gems: i32,
+        _vault_progress: i32,
+    ) -> i64 {
+        wc_common as i64
+            + wc_uncommon as i64
+            + wc_rare as i64
+            + wc_mythic as i64
+            + gold as i64
+            + gems as i64
+    }
+
+    /// Heap-scan for a `ClientPlayerInventory` instance.
+    ///
+    /// **Pre-filter**: enumerate every `Il2CppClass*` in `__DATA`
+    /// whose name is `ClientPlayerInventory` (1 or more — IL2CPP
+    /// keeps multiple variants). Only accept heap slots whose klass
+    /// pointer is in this set. This collapses the "is it an
+    /// inventory?" check to a hash lookup instead of reading+string-
+    /// comparing 2M random class pointers, which was burning most
+    /// of the scan time without finding anything.
+    ///
+    /// **Pass 1**: for each 8-byte-aligned slot whose `+0` matches a
+    /// known ClientPlayerInventory klass pointer, read the seven
+    /// inventory fields at their resolved offsets. Keep only
+    /// candidates whose field values pass the plausibility check
+    /// (wildcards in range, currency in range, and at least one
+    /// field non-zero).
+    ///
+    /// **Pass 2**: among surviving candidates, pick the one with the
+    /// highest activity score. Multiple ClientPlayerInventory
+    /// instances can coexist (live + cached + pending update); the
+    /// "most populated" one is the live account state.
+    fn scan_heap_for_client_player_inventory(
+        reader: &MemReader,
+        pid: u32,
+        offsets: &InventoryFieldOffsets,
+        cpi_classes: &[usize],
+    ) -> Option<usize> {
+        use std::collections::HashSet;
+        let debug = std::env::var("MTGA_DEBUG_INVENTORY").is_ok();
+
+        if cpi_classes.is_empty() {
+            eprintln!(
+                "scan_heap_for_client_player_inventory: caller passed empty class set, nothing to scan for",
+            );
+            return None;
+        }
+        let class_set: HashSet<usize> = cpi_classes.iter().copied().collect();
+
+        // Required tail read: the highest field offset plus 4 bytes
+        // (i32 width).
+        let max_off = [
+            offsets.wc_common,
+            offsets.wc_uncommon,
+            offsets.wc_rare,
+            offsets.wc_mythic,
+            offsets.gold,
+            offsets.gems,
+            offsets.vault_progress,
+        ]
+        .into_iter()
+        .max()
+        .unwrap_or(0);
+        let min_obj_size = max_off + 4;
+
+        let heap_regions = find_scannable_heap_regions(pid);
+        if debug {
+            eprintln!(
+                "scan_heap_for_client_player_inventory: scanning {} heap regions (field span = {} bytes, {} known cpi class ptrs: {:?})",
+                heap_regions.len(),
+                min_obj_size,
+                cpi_classes.len(),
+                cpi_classes.iter().map(|p| format!("0x{:x}", p)).collect::<Vec<_>>(),
+            );
+        }
+
+        // (obj_addr, klass_ptr, activity_score, (fields))
+        let mut candidates: Vec<(usize, usize, i64, [i32; 7])> = Vec::new();
+        for (start, end) in heap_regions {
+            let size = end - start;
+            let buf = reader.read_bytes(start, size);
+            if buf.len() != size {
+                continue;
+            }
+            let mut i = 0usize;
+            while i + min_obj_size <= buf.len() {
+                let klass = u64::from_le_bytes(
+                    buf[i..i + 8].try_into().unwrap_or([0; 8]),
+                ) as usize;
+                if !class_set.contains(&klass) {
+                    i += 8;
+                    continue;
+                }
+                let read_i32_at = |field_off: usize| -> i32 {
+                    let s = i + field_off;
+                    i32::from_le_bytes(buf[s..s + 4].try_into().unwrap_or([0; 4]))
+                };
+                let wc_common = read_i32_at(offsets.wc_common);
+                let wc_uncommon = read_i32_at(offsets.wc_uncommon);
+                let wc_rare = read_i32_at(offsets.wc_rare);
+                let wc_mythic = read_i32_at(offsets.wc_mythic);
+                let gold = read_i32_at(offsets.gold);
+                let gems = read_i32_at(offsets.gems);
+                let vault = read_i32_at(offsets.vault_progress);
+                if !inventory_fields_look_plausible(
+                    wc_common, wc_uncommon, wc_rare, wc_mythic, gold, gems, vault,
+                ) {
+                    i += 8;
+                    continue;
+                }
+                let score = inventory_activity_score(
+                    wc_common, wc_uncommon, wc_rare, wc_mythic, gold, gems, vault,
+                );
+                candidates.push((
+                    start + i,
+                    klass,
+                    score,
+                    [wc_common, wc_uncommon, wc_rare, wc_mythic, gold, gems, vault],
+                ));
+                i += 8;
+            }
+        }
+
+        candidates.sort_by_key(|(_, _, s, _)| std::cmp::Reverse(*s));
+        if debug {
+            eprintln!(
+                "scan_heap_for_client_player_inventory: {} candidates passed (klass-set + plausibility)",
+                candidates.len(),
+            );
+            for (addr, klass, score, fields) in candidates.iter().take(20) {
+                eprintln!(
+                    "  0x{:x} klass=0x{:x} score={} wc=[{},{},{},{}] gold={} gems={} vault={}",
+                    addr, klass, score,
+                    fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], fields[6],
+                );
+            }
+        }
+        candidates.first().map(|(addr, _, _, _)| *addr)
+    }
+
+    /// Public entry point for the inventory reader. Returns wildcard
+    /// counts plus gold / gems / vault progress for the currently
+    /// logged-in Arena player. All values come from a live memory
+    /// read of the `ClientPlayerInventory` singleton — no Arena log
+    /// tailing, no Untapped CSV, no network.
+    ///
+    /// `vault_progress` is read as an `f64` from offset 0x30 and
+    /// holds the percentage directly (e.g. `58.9` for "Vault: 58.9%"
+    /// in Arena's UI). Don't multiply or divide it — the stored
+    /// value matches the UI exactly.
+    pub fn read_mtga_inventory_impl(
+        process_name: &str,
+    ) -> Result<(i32, i32, i32, i32, i32, i32, f64)> {
+        // Returns (wc_common, wc_uncommon, wc_rare, wc_mythic, gold, gems, vault_progress)
+        let pid = find_pid_by_name(process_name)
+            .ok_or_else(|| Error::from_reason(format!("Process '{}' not found", process_name)))?;
+        let reader = MemReader::new(pid);
+
+        let cpi_classes = find_all_classes_by_name(&reader, pid, "ClientPlayerInventory");
+        if cpi_classes.is_empty() {
+            return Err(Error::from_reason(
+                "ClientPlayerInventory class not found via direct __DATA scan. \
+                 Either MTGA isn't fully loaded or the class has been renamed.",
+            ));
+        }
+        // Pick the first class for field-offset resolution. All
+        // variants share the same logical layout so any of them
+        // works for metadata lookup.
+        let cpi_class = cpi_classes[0];
+
+        let debug = std::env::var("MTGA_DEBUG_INVENTORY").is_ok();
+        if debug {
+            eprintln!(
+                "read_mtga_inventory_impl: found {} ClientPlayerInventory class variants: {:?}",
+                cpi_classes.len(),
+                cpi_classes.iter().map(|p| format!("0x{:x}", p)).collect::<Vec<_>>(),
+            );
+        }
+
+        let fields = get_class_fields(&reader, cpi_class);
+        if debug {
+            eprintln!(
+                "read_mtga_inventory_impl: ClientPlayerInventory has {} fields:",
+                fields.len(),
+            );
+            for f in &fields {
+                eprintln!(
+                    "  {:?} @ 0x{:x} (type: {}, static: {})",
+                    f.name, f.offset, f.type_name, f.is_static,
+                );
+            }
+        }
+        let offsets = resolve_inventory_field_offsets(&fields).ok_or_else(|| {
+            // Dump the field list unconditionally on failure so the
+            // user can see what's actually present.
+            eprintln!(
+                "resolve_inventory_field_offsets: failed to find all required fields. Available non-static fields:",
+            );
+            for f in &fields {
+                if !f.is_static {
+                    eprintln!("  {:?} @ 0x{:x} (type: {})", f.name, f.offset, f.type_name);
+                }
+            }
+            Error::from_reason(
+                "Could not resolve ClientPlayerInventory field offsets. Required \
+                 fields: wcCommon, wcUncommon, wcRare, wcMythic, gold, gems, \
+                 vaultProgress. See stderr for the field dump.",
+            )
+        })?;
+        if debug {
+            eprintln!(
+                "read_mtga_inventory_impl: resolved offsets wcCommon=0x{:x} wcUncommon=0x{:x} wcRare=0x{:x} wcMythic=0x{:x} gold=0x{:x} gems=0x{:x} vaultProgress=0x{:x}",
+                offsets.wc_common, offsets.wc_uncommon, offsets.wc_rare, offsets.wc_mythic,
+                offsets.gold, offsets.gems, offsets.vault_progress,
+            );
+        }
+
+        let inst = match scan_heap_for_client_player_inventory(
+            &reader, pid, &offsets, &cpi_classes,
+        ) {
+            Some(addr) => addr,
+            None => {
+                // Diagnostic cascade to help pinpoint why we're not
+                // finding an instance:
+                //
+                // 1. How many times does the class pointer appear in
+                //    heap regions at all? Zero → real instance isn't
+                //    in a region `find_scannable_heap_regions`
+                //    returns. Nonzero but the plausibility filter
+                //    dropped them → offsets are wrong.
+                // 2. What OTHER classes in the process contain
+                //    "Inventory" in their name? Maybe Arena renamed
+                //    `ClientPlayerInventory` or wraps it in
+                //    something else.
+                for cpi_class in &cpi_classes {
+                    let (count, sample) =
+                        count_pointer_occurrences_in_heap(&reader, pid, *cpi_class);
+                    eprintln!(
+                        "diagnostic: cpi_class 0x{:x} appears {} times in scannable heap regions; first {} at: {:?}",
+                        cpi_class,
+                        count,
+                        sample.len(),
+                        sample.iter().map(|a| format!("0x{:x}", a)).collect::<Vec<_>>(),
+                    );
+                    // Dump field values at each sampled address so
+                    // we can see why the plausibility filter rejects
+                    // them. The "object" interpretation starts at
+                    // the address where the class pointer was found.
+                    for (idx, addr) in sample.iter().enumerate() {
+                        let wc_common = reader.read_i32(addr + offsets.wc_common);
+                        let wc_uncommon = reader.read_i32(addr + offsets.wc_uncommon);
+                        let wc_rare = reader.read_i32(addr + offsets.wc_rare);
+                        let wc_mythic = reader.read_i32(addr + offsets.wc_mythic);
+                        let gold = reader.read_i32(addr + offsets.gold);
+                        let gems = reader.read_i32(addr + offsets.gems);
+                        let vault = reader.read_i32(addr + offsets.vault_progress);
+                        eprintln!(
+                            "    [{}] 0x{:x} wc=[{},{},{},{}] gold={} gems={} vault={}",
+                            idx, addr, wc_common, wc_uncommon, wc_rare, wc_mythic, gold, gems, vault,
+                        );
+                    }
+                }
+                let inventory_classes =
+                    find_classes_by_name_substr(&reader, pid, "Inventory");
+                eprintln!(
+                    "diagnostic: classes whose name contains \"Inventory\":",
+                );
+                for (class_ptr, class_name) in &inventory_classes {
+                    eprintln!("  0x{:x} {:?}", class_ptr, class_name);
+                }
+                return Err(Error::from_reason(
+                    "ClientPlayerInventory instance not found in heap. See \
+                     the diagnostic output above: if the class pointer appears \
+                     zero times in heap, the real instance is outside the \
+                     scanned regions or wrapped in a different class; if it \
+                     appears many times, the field offsets may be wrong.",
+                ));
+            }
+        };
+
+        let wc_common = reader.read_i32(inst + offsets.wc_common);
+        let wc_uncommon = reader.read_i32(inst + offsets.wc_uncommon);
+        let wc_rare = reader.read_i32(inst + offsets.wc_rare);
+        let wc_mythic = reader.read_i32(inst + offsets.wc_mythic);
+        let gold = reader.read_i32(inst + offsets.gold);
+        let gems = reader.read_i32(inst + offsets.gems);
+        // vaultProgress is an 8-byte `double` in the C# class
+        // layout (field spacing 0x30→0x38 confirms 8 bytes wide),
+        // NOT an int32 like the old IL2CPP research summary claimed.
+        // The stored value is the UI percentage directly (58.9 in
+        // decimal = 0x404d733333333333 as little-endian double).
+        let vault_progress = reader.read_f64(inst + offsets.vault_progress);
+
+        if debug {
+            eprintln!(
+                "read_mtga_inventory_impl: inst=0x{:x} wc={{C:{}, U:{}, R:{}, M:{}}} gold={} gems={} vault_pct={}",
+                inst, wc_common, wc_uncommon, wc_rare, wc_mythic, gold, gems, vault_progress,
+            );
+        }
+        Ok((
+            wc_common,
+            wc_uncommon,
+            wc_rare,
+            wc_mythic,
+            gold,
+            gems,
+            vault_progress,
+        ))
     }
 
     /// Diagnostic: find the `CardPrintingRecord` class and dump its
@@ -3231,6 +4598,182 @@ pub fn read_mtga_cards(process_name: String) -> serde_json::Value {
     {
         let _ = process_name;
         serde_json::json!({ "error": "readMtgaCards is macOS-only in this local fork" })
+    }
+}
+
+/// Inventory reader. Returns the current player's wildcard counts
+/// plus currency and vault progress, read directly from the
+/// `ClientPlayerInventory` singleton in Arena's memory.
+///
+/// Returns `{ wcCommon, wcUncommon, wcRare, wcMythic, gold, gems,
+/// vaultProgress }` on success, `{ error }` on failure.
+///
+/// `vaultProgress` is a number in `0.0 – 100.0` matching Arena's UI
+/// exactly (e.g. `58.9` when the UI shows "Vault: 58.9%"). The raw
+/// field is stored as an 8-byte `double` in the C# class, not an
+/// int — NOTES / IL2CPP_RESEARCH_SUMMARY.md were wrong about this.
+///
+/// Set `MTGA_DEBUG_INVENTORY=1` for verbose stderr diagnostics (class
+/// location, field dump, candidate counts).
+#[napi]
+pub fn read_mtga_inventory(process_name: String) -> serde_json::Value {
+    #[cfg(target_os = "macos")]
+    {
+        match macos_backend::read_mtga_inventory_impl(&process_name) {
+            Ok((wc_common, wc_uncommon, wc_rare, wc_mythic, gold, gems, vault_progress)) => {
+                serde_json::json!({
+                    "wcCommon": wc_common,
+                    "wcUncommon": wc_uncommon,
+                    "wcRare": wc_rare,
+                    "wcMythic": wc_mythic,
+                    "gold": gold,
+                    "gems": gems,
+                    "vaultProgress": vault_progress,
+                })
+            }
+            Err(e) => serde_json::json!({ "error": e.to_string() }),
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = process_name;
+        serde_json::json!({ "error": "readMtgaInventory is macOS-only in this local fork" })
+    }
+}
+
+/// Card-database reader. Walks PAPA → CardDatabase → printing
+/// dictionary and returns, for every `CardPrintingRecord` in the
+/// running Arena process, the tuple
+/// `{ grpId, set, collectorNumber, titleId }`.
+///
+/// Callers combine this with `readMtgaCards` (the collection dict
+/// reader) and either (a) look up each `(set, collectorNumber)` via
+/// Scryfall's `/cards/{set}/{number}` endpoint — which returns
+/// cards even when `arena_id` is null — or (b) walk the localization
+/// table using `titleId` for a fully offline name lookup.
+#[napi]
+pub fn read_mtga_card_database(process_name: String) -> serde_json::Value {
+    #[cfg(target_os = "macos")]
+    {
+        match macos_backend::read_mtga_card_database_impl(&process_name) {
+            Ok(entries) => {
+                let cards: Vec<serde_json::Value> = entries
+                    .into_iter()
+                    .map(|(grp_id, set, num, title_id)| {
+                        serde_json::json!({
+                            "grpId": grp_id,
+                            "set": set,
+                            "collectorNumber": num,
+                            "titleId": title_id,
+                        })
+                    })
+                    .collect();
+                serde_json::json!({ "cards": cards })
+            }
+            Err(e) => serde_json::json!({ "error": e.to_string() }),
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = process_name;
+        serde_json::json!({ "error": "readMtgaCardDatabase is macOS-only in this local fork" })
+    }
+}
+
+/// Mono-backend card-collection reader. Targets Arena processes running
+/// the Mono scripting backend (Windows native or Wine). Pass the process
+/// name or path fragment (e.g. "MTGA.exe" for Wine).
+#[napi]
+pub fn read_mtga_cards_mono(process_name: String) -> serde_json::Value {
+    match crate::mono::scanner::read_mtga_cards_mono(&process_name) {
+        Ok(entries) => {
+            let cards: Vec<serde_json::Value> = entries
+                .into_iter()
+                .map(|(key, value)| serde_json::json!({ "cardId": key, "quantity": value }))
+                .collect();
+            serde_json::json!({ "cards": cards })
+        }
+        Err(e) => serde_json::json!({ "error": e }),
+    }
+}
+
+/// Mono-backend card-database reader.
+#[napi]
+pub fn read_mtga_card_database_mono(process_name: String) -> serde_json::Value {
+    match crate::mono::scanner::read_mtga_card_database_mono(&process_name) {
+        Ok(entries) => {
+            let cards: Vec<serde_json::Value> = entries
+                .into_iter()
+                .map(|(grp_id, set, num, title_id)| {
+                    serde_json::json!({
+                        "grpId": grp_id,
+                        "set": set,
+                        "collectorNumber": num,
+                        "titleId": title_id,
+                    })
+                })
+                .collect();
+            serde_json::json!({ "cards": cards })
+        }
+        Err(e) => serde_json::json!({ "error": e }),
+    }
+}
+
+/// Mono-backend inventory reader.
+/// Pass known_gold and known_gems (visible in Arena's UI) for exact
+/// anchoring. Pass 0 for both to use the generic scanner (less reliable).
+#[napi]
+pub fn read_mtga_inventory_mono(process_name: String, known_gold: i32, known_gems: i32) -> serde_json::Value {
+    match crate::mono::scanner::read_mtga_inventory_mono(&process_name, known_gold, known_gems) {
+        Ok((wc, wu, wr, wm, gold, gems, vault)) => {
+            serde_json::json!({
+                "wcCommon": wc,
+                "wcUncommon": wu,
+                "wcRare": wr,
+                "wcMythic": wm,
+                "gold": gold,
+                "gems": gems,
+                "vaultProgress": vault,
+            })
+        }
+        Err(e) => serde_json::json!({ "error": e }),
+    }
+}
+
+/// Debug: probe a MonoClass struct to find the name field offset.
+#[napi]
+pub fn probe_mono_class(process_name: String, class_address: String) -> serde_json::Value {
+    let addr = u64::from_str_radix(class_address.trim_start_matches("0x"), 16)
+        .unwrap_or(0) as usize;
+    match crate::mono::scanner::probe_mono_class_name_offset(&process_name, addr) {
+        Ok(result) => serde_json::json!({ "result": result }),
+        Err(e) => serde_json::json!({ "error": e }),
+    }
+}
+
+/// Debug: read raw bytes from a Mono Arena process at a given address.
+/// Returns hex string. Used for discovering Mono struct layouts.
+#[napi]
+pub fn read_mono_bytes(process_name: String, address: String, length: i32) -> serde_json::Value {
+    let addr = u64::from_str_radix(address.trim_start_matches("0x"), 16)
+        .unwrap_or(0) as usize;
+    if addr == 0 || length <= 0 {
+        return serde_json::json!({ "error": "invalid address or length" });
+    }
+    match crate::mono::scanner::read_bytes_at(&process_name, addr, length as usize) {
+        Ok(hex) => serde_json::json!({ "hex": hex }),
+        Err(e) => serde_json::json!({ "error": e }),
+    }
+}
+
+/// Debug probe: search heap for two adjacent i32 values and dump context.
+/// Use to discover field offsets on Mono.
+/// Example: probeHeapForI32Pair("MTGA.exe", 1825, 610) finds gold+gems.
+#[napi]
+pub fn probe_heap_for_i32_pair(process_name: String, val_a: i32, val_b: i32) -> serde_json::Value {
+    match crate::mono::scanner::probe_heap_for_i32_pair(&process_name, val_a, val_b) {
+        Ok(result) => serde_json::json!({ "result": result }),
+        Err(e) => serde_json::json!({ "error": e }),
     }
 }
 
