@@ -304,6 +304,138 @@ pub fn read_decks(process_name: String) -> Value {
     json!({ "count": decks.len(), "decks": decks })
 }
 
+fn f64_field(r: &MonoReader, obj: usize, name: &str) -> Option<f64> {
+    let (addr, _c) = field_addr(r, obj, name)?;
+    let b = r.read_bytes(addr, 8);
+    if b.len() < 8 {
+        return None;
+    }
+    Some(f64::from_le_bytes([
+        b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+    ]))
+}
+
+/// Read a Dictionary<uint,int> (16-byte entries: hashCode@+0, next@+4, key@+8, value@+12).
+fn read_uint_int_dict(r: &MonoReader, dict: usize) -> Vec<(u32, i32)> {
+    let mut out = Vec::new();
+    let entries = r.read_ptr(dict + 0x18);
+    if !dvalid(entries) {
+        return out;
+    }
+    let len = r.read_i32(entries + 0x18);
+    if len <= 0 || len > 1_000_000 {
+        return out;
+    }
+    let data = entries + 0x20;
+    for i in 0..len {
+        let e = data + i as usize * 16;
+        if r.read_i32(e) < 0 {
+            continue; // free slot
+        }
+        let key = r.read_u32(e + 8);
+        let val = r.read_i32(e + 12);
+        if key > 0 {
+            out.push((key, val));
+        }
+    }
+    out
+}
+
+/// Read the player's account identity (from AccountInformation).
+pub fn read_account(process_name: String) -> Value {
+    let mut reader = match crate::get_reader(process_name) {
+        Some(r) => r,
+        None => return json!({ "error": "could not open MTGA process (run elevated)" }),
+    };
+    let instance = match wrapper_instance(&mut reader) {
+        Some(i) => i,
+        None => return json!({ "error": "WrapperController.Instance is null (must be on the home screen, not in a match)" }),
+    };
+    let reader: &MonoReader = &reader;
+
+    let ai = ref_field(reader, instance, "<AccountClient>k__BackingField")
+        .and_then(|ac| ref_field(reader, ac, "<AccountInformation>k__BackingField"));
+    let ai = match ai {
+        Some(a) => a,
+        None => return json!({ "error": "could not reach AccountClient.AccountInformation" }),
+    };
+
+    json!({
+        "displayName": string_field(reader, ai, "DisplayName"),
+        "accountId": string_field(reader, ai, "AccountID"),
+        "personaId": string_field(reader, ai, "PersonaID"),
+        "gameId": string_field(reader, ai, "GameID"),
+        "email": string_field(reader, ai, "Email"),
+        "externalId": string_field(reader, ai, "ExternalID"),
+        "countryCode": string_field(reader, ai, "CountryCode"),
+        "accessToken": string_field(reader, ai, "AccessToken"),
+    })
+}
+
+/// Read the player's owned-card collection (grpId -> quantity).
+pub fn read_collection(process_name: String) -> Value {
+    let mut reader = match crate::get_reader(process_name) {
+        Some(r) => r,
+        None => return json!({ "error": "could not open MTGA process (run elevated)" }),
+    };
+    let instance = match wrapper_instance(&mut reader) {
+        Some(i) => i,
+        None => return json!({ "error": "WrapperController.Instance is null (must be on the home screen, not in a match)" }),
+    };
+    let reader: &MonoReader = &reader;
+
+    let cards = ref_field(reader, instance, "<InventoryManager>k__BackingField")
+        .and_then(|im| ref_field(reader, im, "InventoryServiceWrapper"))
+        .and_then(|w| ref_field(reader, w, "<Cards>k__BackingField"));
+    let cards = match cards {
+        Some(c) => c,
+        None => return json!({ "error": "could not reach InventoryServiceWrapper.Cards" }),
+    };
+
+    let list = read_uint_int_dict(reader, cards);
+    let arr: Vec<Value> = list
+        .iter()
+        .map(|(g, q)| json!({ "grpId": g, "qty": q }))
+        .collect();
+    json!({ "count": arr.len(), "cards": arr })
+}
+
+/// Read the player's wallet/inventory (gems, gold, wildcards, vault, ...).
+pub fn read_inventory(process_name: String) -> Value {
+    let mut reader = match crate::get_reader(process_name) {
+        Some(r) => r,
+        None => return json!({ "error": "could not open MTGA process (run elevated)" }),
+    };
+    let instance = match wrapper_instance(&mut reader) {
+        Some(i) => i,
+        None => return json!({ "error": "WrapperController.Instance is null (must be on the home screen, not in a match)" }),
+    };
+    let reader: &MonoReader = &reader;
+
+    let inv = ref_field(reader, instance, "<InventoryManager>k__BackingField")
+        .and_then(|im| ref_field(reader, im, "InventoryServiceWrapper"))
+        .and_then(|w| ref_field(reader, w, "m_inventory"));
+    let inv = match inv {
+        Some(i) => i,
+        None => return json!({ "error": "could not reach InventoryServiceWrapper.m_inventory" }),
+    };
+
+    json!({
+        "gems": i32_field(reader, inv, "gems"),
+        "gold": i32_field(reader, inv, "gold"),
+        "wildcards": {
+            "common": i32_field(reader, inv, "wcCommon"),
+            "uncommon": i32_field(reader, inv, "wcUncommon"),
+            "rare": i32_field(reader, inv, "wcRare"),
+            "mythic": i32_field(reader, inv, "wcMythic"),
+        },
+        "wcTrackPosition": i32_field(reader, inv, "wcTrackPosition"),
+        "vaultProgress": f64_field(reader, inv, "vaultProgress"),
+        "basicLandSet": string_field(reader, inv, "basicLandSet"),
+        "latestBasicLandSet": string_field(reader, inv, "latestBasicLandSet"),
+    })
+}
+
 /// Read the player's constructed + limited rank info.
 pub fn read_ranks(process_name: String) -> Value {
     let mut reader = match crate::get_reader(process_name) {

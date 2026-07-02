@@ -19,7 +19,7 @@ pub mod api;
 #[cfg(target_os = "windows")]
 pub mod queries;
 #[cfg(target_os = "windows")]
-pub use queries::{read_decks, read_ranks};
+pub use queries::{read_account, read_collection, read_decks, read_inventory, read_ranks};
 
 // Legacy modules (kept for backward compatibility)
 pub mod constants;

@@ -310,7 +310,7 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { isAdmin, findProcess, init, close, isInitialized, getAssemblies, getAssemblyClasses, getClassDetails, getInstance, getInstanceField, getStaticField, getDictionary, readData, readClass, readGenericInstance, readDecks, readRanks } = nativeBinding
+const { isAdmin, findProcess, init, close, isInitialized, getAssemblies, getAssemblyClasses, getClassDetails, getInstance, getInstanceField, getStaticField, getDictionary, readData, readClass, readGenericInstance, readDecks, readRanks, readAccount, readCollection, readInventory } = nativeBinding
 
 module.exports.isAdmin = isAdmin
 module.exports.findProcess = findProcess
@@ -329,3 +329,6 @@ module.exports.readClass = readClass
 module.exports.readGenericInstance = readGenericInstance
 module.exports.readDecks = readDecks
 module.exports.readRanks = readRanks
+module.exports.readAccount = readAccount
+module.exports.readCollection = readCollection
+module.exports.readInventory = readInventory

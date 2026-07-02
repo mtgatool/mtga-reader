@@ -617,6 +617,18 @@ mod windows_backend {
     pub fn read_ranks_impl(process_name: &str) -> serde_json::Value {
         crate::read_ranks(process_name.to_string())
     }
+
+    pub fn read_account_impl(process_name: &str) -> serde_json::Value {
+        crate::read_account(process_name.to_string())
+    }
+
+    pub fn read_collection_impl(process_name: &str) -> serde_json::Value {
+        crate::read_collection(process_name.to_string())
+    }
+
+    pub fn read_inventory_impl(process_name: &str) -> serde_json::Value {
+        crate::read_inventory(process_name.to_string())
+    }
 }
 
 // ============================================================================
@@ -1347,6 +1359,18 @@ mod macos_backend {
     pub fn read_ranks_impl(_process_name: &str) -> serde_json::Value {
         serde_json::json!({ "error": "read_ranks not implemented for the IL2CPP backend" })
     }
+
+    pub fn read_account_impl(_process_name: &str) -> serde_json::Value {
+        serde_json::json!({ "error": "read_account not implemented for the IL2CPP backend" })
+    }
+
+    pub fn read_collection_impl(_process_name: &str) -> serde_json::Value {
+        serde_json::json!({ "error": "read_collection not implemented for the IL2CPP backend" })
+    }
+
+    pub fn read_inventory_impl(_process_name: &str) -> serde_json::Value {
+        serde_json::json!({ "error": "read_inventory not implemented for the IL2CPP backend" })
+    }
 }
 
 // ============================================================================
@@ -1555,6 +1579,45 @@ pub fn read_ranks(process_name: String) -> serde_json::Value {
 
     #[cfg(target_os = "macos")]
     { macos_backend::read_ranks_impl(&process_name) }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    { serde_json::json!({ "error": "Platform not supported" }) }
+}
+
+/// Read the player's account identity (displayName, accountId, personaId, ...).
+#[napi]
+pub fn read_account(process_name: String) -> serde_json::Value {
+    #[cfg(target_os = "windows")]
+    { windows_backend::read_account_impl(&process_name) }
+
+    #[cfg(target_os = "macos")]
+    { macos_backend::read_account_impl(&process_name) }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    { serde_json::json!({ "error": "Platform not supported" }) }
+}
+
+/// Read the player's owned-card collection (grpId -> quantity).
+#[napi]
+pub fn read_collection(process_name: String) -> serde_json::Value {
+    #[cfg(target_os = "windows")]
+    { windows_backend::read_collection_impl(&process_name) }
+
+    #[cfg(target_os = "macos")]
+    { macos_backend::read_collection_impl(&process_name) }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    { serde_json::json!({ "error": "Platform not supported" }) }
+}
+
+/// Read the player's wallet/inventory (gems, gold, wildcards, vault, ...).
+#[napi]
+pub fn read_inventory(process_name: String) -> serde_json::Value {
+    #[cfg(target_os = "windows")]
+    { windows_backend::read_inventory_impl(&process_name) }
+
+    #[cfg(target_os = "macos")]
+    { macos_backend::read_inventory_impl(&process_name) }
 
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     { serde_json::json!({ "error": "Platform not supported" }) }

@@ -70,3 +70,9 @@ export declare function readGenericInstance(processName: string, address: number
 export declare function readDecks(processName: string): any
 /** Read the player's constructed + limited rank info. */
 export declare function readRanks(processName: string): any
+/** Read the player's account identity (displayName, accountId, personaId, ...). */
+export declare function readAccount(processName: string): any
+/** Read the player's owned-card collection (grpId -> quantity). */
+export declare function readCollection(processName: string): any
+/** Read the player's wallet/inventory (gems, gold, wildcards, vault, ...). */
+export declare function readInventory(processName: string): any
