@@ -96,393 +96,32 @@ where
 }
 
 // Handler functions
-// ---- Deck reading helpers (all bounded / safe) ----
+// ---- Typed readers: delegate to the shared library (src/queries.rs) so the
+// server and the .node binary use one implementation. ----
 
-fn dvalid(p: usize) -> bool {
-    p > 0x10000 && p < 0x7FFF_FFFF_FFFF
+/// GET /decks — saved decks (name, deckId, format/attributes, piles + cards).
+async fn get_decks() -> Json<serde_json::Value> {
+    Json(mtga_reader::read_decks("MTGA".to_string()))
 }
 
-fn deck_class_of(r: &MonoReader, obj: usize) -> usize {
-    let vt = r.read_ptr(obj);
-    if dvalid(vt) { r.read_ptr(vt) } else { 0 }
+/// GET /ranks — constructed + limited rank info.
+async fn get_ranks() -> Json<serde_json::Value> {
+    Json(mtga_reader::read_ranks("MTGA".to_string()))
 }
 
-fn deck_class_name(r: &MonoReader, obj: usize) -> String {
-    let c = deck_class_of(r, obj);
-    if dvalid(c) {
-        let td = TypeDefinition::new(c, r);
-        if td.name.len() <= 200 { td.name } else { String::new() }
-    } else {
-        String::new()
-    }
+/// GET /account — account identity (displayName, accountId, ...).
+async fn get_account() -> Json<serde_json::Value> {
+    Json(mtga_reader::read_account("MTGA".to_string()))
 }
 
-/// Resolve (field_storage_addr, type_code) for a field on `obj` by name,
-/// walking the class hierarchy (get_field is recursive).
-fn deck_field(r: &MonoReader, obj: usize, name: &str) -> Option<(usize, u32)> {
-    let cls = deck_class_of(r, obj);
-    if !dvalid(cls) {
-        return None;
-    }
-    let td = TypeDefinition::new(cls, r);
-    let (fa, _ti) = td.get_field(name);
-    if fa == 0 {
-        return None;
-    }
-    let fd = FieldDefinition::new(fa, r);
-    Some((obj + fd.offset as usize, fd.type_info.type_code))
+/// GET /collection — owned-card collection (grpId -> qty).
+async fn get_collection() -> Json<serde_json::Value> {
+    Json(mtga_reader::read_collection("MTGA".to_string()))
 }
 
-fn deck_ref(r: &MonoReader, obj: usize, name: &str) -> Option<usize> {
-    let (addr, _c) = deck_field(r, obj, name)?;
-    let child = r.read_ptr(addr);
-    if dvalid(child) { Some(child) } else { None }
-}
-
-fn deck_string(r: &MonoReader, obj: usize, name: &str) -> Option<String> {
-    let (addr, _c) = deck_field(r, obj, name)?;
-    r.read_mono_string(r.read_ptr(addr))
-}
-
-/// Read a pile's List<{uint grpId, int qty}> value-type array.
-/// List layout: _items ptr @+0x10, _size @+0x18. Array data @+0x20, 8 bytes/elem.
-fn read_pile_list(r: &MonoReader, list_ptr: usize) -> Vec<(u32, i32)> {
-    let mut out = Vec::new();
-    let items = r.read_ptr(list_ptr + 0x10);
-    let size = r.read_i32(list_ptr + 0x18);
-    if !dvalid(items) || size <= 0 || size > 5000 {
-        return out;
-    }
-    let data = items + 0x20;
-    for i in 0..size {
-        let base = data + i as usize * 8;
-        let grp = r.read_u32(base);
-        let qty = r.read_i32(base + 4);
-        if grp > 0 && qty > 0 && qty < 1000 {
-            out.push((grp, qty));
-        }
-    }
-    out
-}
-
-/// Read a System.Guid value type (16 bytes) and format it canonically.
-fn read_guid(r: &MonoReader, addr: usize) -> String {
-    let b = r.read_bytes(addr, 16);
-    if b.len() < 16 {
-        return String::new();
-    }
-    let d1 = u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
-    let d2 = u16::from_le_bytes([b[4], b[5]]);
-    let d3 = u16::from_le_bytes([b[6], b[7]]);
-    format!(
-        "{:08x}-{:04x}-{:04x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-        d1, d2, d3, b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]
-    )
-}
-
-/// Read a Dictionary<string,string> into (key,value) pairs.
-/// 24-byte entries: hashCode@+0, next@+4, key(str*)@+0x08, value(str*)@+0x10.
-fn read_string_dict(r: &MonoReader, dict: usize) -> Vec<(String, String)> {
-    let mut out = Vec::new();
-    let entries = r.read_ptr(dict + 0x18);
-    if !dvalid(entries) {
-        return out;
-    }
-    let cap = r.read_i32(entries + 0x18);
-    if cap <= 0 || cap > 10_000 {
-        return out;
-    }
-    let data = entries + 0x20;
-    for i in 0..cap {
-        let e = data + i as usize * 24;
-        if r.read_i32(e) < 0 {
-            continue;
-        }
-        if let Some(k) = r.read_mono_string(r.read_ptr(e + 0x08)) {
-            let v = r.read_mono_string(r.read_ptr(e + 0x10)).unwrap_or_default();
-            out.push((k, v));
-        }
-    }
-    out
-}
-
-/// Map an EDeckPile enum value (Wizards.Mtga.Decks) to its name.
-fn deck_pile_name(key: i32) -> &'static str {
-    match key {
-        0 => "Invalid",
-        1 => "Main",
-        2 => "Sideboard",
-        3 => "CommandZone",
-        4 => "Companions",
-        _ => "Unknown",
-    }
-}
-
-/// Read Piles = Dictionary<int pileType, List<..>>.
-/// Dict _entries @+0x18; 24-byte entries: hashCode@+0, key(int)@+0x08, value(ptr)@+0x10.
-fn read_piles(r: &MonoReader, dict: usize) -> Vec<(i32, Vec<(u32, i32)>)> {
-    let mut out = Vec::new();
-    let entries = r.read_ptr(dict + 0x18);
-    if !dvalid(entries) {
-        return out;
-    }
-    let cap = r.read_i32(entries + 0x18);
-    if cap <= 0 || cap > 100_000 {
-        return out;
-    }
-    let data = entries + 0x20;
-    for i in 0..cap {
-        let e = data + i as usize * 24;
-        if r.read_i32(e) < 0 {
-            continue; // free slot
-        }
-        let key = r.read_i32(e + 0x08);
-        let val = r.read_ptr(e + 0x10);
-        if !dvalid(val) {
-            continue;
-        }
-        let cards = read_pile_list(r, val);
-        if !cards.is_empty() {
-            out.push((key, cards));
-        }
-    }
-    out
-}
-
-/// Shallow, bounded field dump of an object (own + inherited).
-fn dump_fields(r: &MonoReader, obj: usize, max_fields: usize) -> Vec<serde_json::Value> {
-    let mut out = Vec::new();
-    let mut cur = deck_class_of(r, obj);
-    let mut depth = 0;
-    while dvalid(cur) && depth < 8 {
-        let td = TypeDefinition::new(cur, r);
-        if td.name.is_empty() || td.name.len() > 200 {
-            break;
-        }
-        if td.field_count > 0 && td.field_count < 4000 {
-            for fa in td.get_fields() {
-                let fd = FieldDefinition::new(fa, r);
-                if fd.type_info.is_static || fd.type_info.is_const {
-                    continue;
-                }
-                let code = fd.type_info.type_code;
-                let mut entry = serde_json::json!({
-                    "name": fd.name,
-                    "offset": format!("0x{:x}", fd.offset),
-                    "code": format!("0x{:x}", code),
-                    "decl": td.name,
-                });
-                if code == 0x0e {
-                    // STRING
-                    if let Some(s) = r.read_mono_string(r.read_ptr(obj + fd.offset as usize)) {
-                        entry["string"] = serde_json::json!(s);
-                    }
-                } else if code == 0x12 || code == 0x15 || code == 0x1c {
-                    let child = r.read_ptr(obj + fd.offset as usize);
-                    if dvalid(child) {
-                        entry["child_addr"] = serde_json::json!(format!("0x{:x}", child));
-                        entry["child_class"] = serde_json::json!(deck_class_name(r, child));
-                    }
-                }
-                out.push(entry);
-                if out.len() >= max_fields {
-                    return out;
-                }
-            }
-        }
-        cur = td.parent_addr;
-        depth += 1;
-    }
-    out
-}
-
-/// GET /decks[?max=N][&debug=1]
-/// Enumerate the player's saved decks from memory (home screen only).
-async fn get_decks(Query(params): Query<HashMap<String, String>>) -> Json<serde_json::Value> {
-    let max: usize = params.get("max").and_then(|s| s.parse().ok()).unwrap_or(400);
-    let debug = matches!(params.get("debug").map(|s| s.as_str()), Some("1") | Some("true"));
-
-    let mut owned = match mtga_reader::get_reader("MTGA".to_string()) {
-        Some(r) => r,
-        None => return Json(serde_json::json!({ "error": "could not open MTGA (run elevated)" })),
-    };
-    let reader = &mut owned;
-
-    // WrapperController.Instance (home screen only)
-    let wc_addr = {
-        let mut found = None;
-        let img = reader.read_assembly_image();
-        if img != 0 {
-            for d in reader.create_type_definitions_for_image(img) {
-                if TypeDefinition::new(d, reader).name == "WrapperController" { found = Some(d); break; }
-            }
-        }
-        if found.is_none() {
-            for asm in reader.get_all_assembly_names() {
-                if asm == "Assembly-CSharp" { continue; }
-                let img = reader.read_assembly_image_by_name(&asm);
-                if img == 0 { continue; }
-                if let Some(d) = reader
-                    .create_type_definitions_for_image(img)
-                    .into_iter()
-                    .find(|d| TypeDefinition::new(*d, reader).name == "WrapperController")
-                {
-                    found = Some(d);
-                    break;
-                }
-            }
-        }
-        found
-    };
-    let wc_addr = match wc_addr {
-        Some(a) => a,
-        None => return Json(serde_json::json!({ "error": "WrapperController not found" })),
-    };
-    let instance = {
-        let wc_td = TypeDefinition::new(wc_addr, reader);
-        let (inst_addr, _ti) = wc_td.get_static_value("<Instance>k__BackingField");
-        reader.read_ptr(inst_addr)
-    };
-    if !dvalid(instance) {
-        return Json(serde_json::json!({ "error": "WrapperController.Instance is null (must be on the home screen, not in a match)" }));
-    }
-
-    // WrapperController.DecksManager._deckDataProvider._allDecks
-    let all_decks = deck_ref(reader, instance, "DecksManager")
-        .and_then(|dm| deck_ref(reader, dm, "_deckDataProvider"))
-        .and_then(|dp| deck_ref(reader, dp, "_allDecks"));
-    let all_decks = match all_decks {
-        Some(a) => a,
-        None => return Json(serde_json::json!({ "error": "could not reach DecksManager._deckDataProvider._allDecks" })),
-    };
-
-    // _allDecks is a Dictionary<uint, Deck>: _entries at +0x18, 32-byte entries,
-    // Deck pointer at entry+0x18, hashCode at entry+0x00.
-    let entries = reader.read_ptr(all_decks + 0x18);
-    if !dvalid(entries) {
-        return Json(serde_json::json!({ "error": "_allDecks._entries not found" }));
-    }
-    let cap = reader.read_i32(entries + 0x18);
-    if cap <= 0 || cap > 100_000 {
-        return Json(serde_json::json!({ "error": format!("implausible entries length {}", cap) }));
-    }
-    let data = entries + 0x20;
-    let stride = 32usize;
-
-    let mut decks: Vec<serde_json::Value> = Vec::new();
-    let mut debug_info = serde_json::Value::Null;
-    let mut raw_entries: Vec<serde_json::Value> = Vec::new();
-
-    for i in 0..cap {
-        let e = data + i as usize * stride;
-        if reader.read_i32(e) < 0 {
-            continue; // free slot
-        }
-        let deck_ptr = reader.read_ptr(e + 0x18);
-        if !dvalid(deck_ptr) {
-            continue;
-        }
-
-        // Detect a deck by the presence of a `_summary` reference rather than a
-        // hardcoded class name.
-        let summary = deck_ref(reader, deck_ptr, "_summary");
-
-        // Raw diagnostics for the first few live entries (helps if the layout drifts).
-        if debug && raw_entries.len() < 6 {
-            raw_entries.push(serde_json::json!({
-                "i": i,
-                "deck_ptr": format!("0x{:x}", deck_ptr),
-                "deck_class": deck_class_name(reader, deck_ptr),
-                "has_summary": summary.is_some(),
-                "at_0x10": format!("0x{:x}", reader.read_ptr(e + 0x10)),
-            }));
-        }
-
-        if summary.is_none() {
-            continue;
-        }
-
-        let name = summary.and_then(|s| deck_string(reader, s, "Name")).unwrap_or_default();
-        let deck_id = summary
-            .and_then(|s| deck_field(reader, s, "DeckId"))
-            .map(|(addr, _)| read_guid(reader, addr));
-        let description = summary
-            .and_then(|s| deck_string(reader, s, "Description"))
-            .filter(|s| !s.is_empty());
-        let tile_id = summary
-            .and_then(|s| deck_field(reader, s, "DeckTileId"))
-            .map(|(addr, _)| reader.read_u32(addr));
-        let attributes: serde_json::Map<String, serde_json::Value> = summary
-            .and_then(|s| deck_ref(reader, s, "Attributes"))
-            .map(|d| {
-                read_string_dict(reader, d)
-                    .into_iter()
-                    .map(|(k, v)| (k, serde_json::Value::String(v)))
-                    .collect()
-            })
-            .unwrap_or_default();
-        let contents = deck_ref(reader, deck_ptr, "_contents");
-        let piles = contents.and_then(|c| deck_ref(reader, c, "Piles"));
-        let pile_data = piles.map(|p| read_piles(reader, p)).unwrap_or_default();
-
-        let piles_json: Vec<serde_json::Value> = pile_data
-            .iter()
-            .map(|(key, cards)| {
-                serde_json::json!({
-                    "pile": key,
-                    "pileName": deck_pile_name(*key),
-                    "total": cards.iter().map(|(_, q)| *q).sum::<i32>(),
-                    "cards": cards
-                        .iter()
-                        .map(|(g, q)| serde_json::json!({ "grpId": g, "qty": q }))
-                        .collect::<Vec<_>>(),
-                })
-            })
-            .collect();
-
-        decks.push(serde_json::json!({
-            "name": name,
-            "deckId": deck_id,
-            "description": description,
-            "tileId": tile_id,
-            "attributes": attributes,
-            "piles": piles_json,
-        }));
-
-        // Rich diagnostics for the first deck so we can finalize card parsing.
-        if debug && debug_info.is_null() {
-            let mut d = serde_json::json!({
-                "deck_fields": dump_fields(reader, deck_ptr, 40),
-            });
-            if let Some(s) = summary {
-                d["summary_fields"] = serde_json::json!(dump_fields(reader, s, 40));
-            }
-            if let Some(c) = contents {
-                d["contents_fields"] = serde_json::json!(dump_fields(reader, c, 40));
-            }
-            if let Some(p) = piles {
-                d["piles_class"] = serde_json::json!(deck_class_name(reader, p));
-                d["piles_fields"] = serde_json::json!(dump_fields(reader, p, 40));
-                // raw head
-                let head: Vec<String> = (0..8)
-                    .map(|k| format!("+0x{:x}=0x{:x}", k * 8, reader.read_ptr(p + k * 8)))
-                    .collect();
-                d["piles_head"] = serde_json::json!(head);
-            }
-            debug_info = d;
-        }
-
-        if decks.len() >= max {
-            break;
-        }
-    }
-
-    Json(serde_json::json!({
-        "count": decks.len(),
-        "decks": decks,
-        "debug": debug_info,
-        "raw_entries": raw_entries,
-    }))
+/// GET /inventory — wallet (gems, gold, wildcards, vault, ...).
+async fn get_inventory() -> Json<serde_json::Value> {
+    Json(mtga_reader::read_inventory("MTGA".to_string()))
 }
 
 #[derive(Serialize)]
@@ -1559,6 +1198,10 @@ async fn main() {
         .route("/read", get(read_path))
         .route("/explore", get(read_explore))
         .route("/decks", get(get_decks))
+        .route("/ranks", get(get_ranks))
+        .route("/account", get(get_account))
+        .route("/collection", get(get_collection))
+        .route("/inventory", get(get_inventory))
         .route("/singletons", get(find_singletons))
         .route("/assemblies", get(get_assemblies))
         .route("/assembly/:name/classes", get(get_assembly_classes))

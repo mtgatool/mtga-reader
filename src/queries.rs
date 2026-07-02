@@ -181,56 +181,69 @@ fn rank_class_name(v: u32) -> &'static str {
     }
 }
 
-/// Locate WrapperController.Instance (home screen; null during a match).
-fn wrapper_instance(reader: &mut MonoReader) -> Option<usize> {
-    let mut wc = None;
+/// Find the WrapperController *class* definition (Assembly-CSharp, then all
+/// assemblies). This is the expensive step (scans loaded assemblies), so a
+/// session caches the returned address across polls.
+pub fn find_wrapper_controller(reader: &mut MonoReader) -> Option<usize> {
     let img = reader.read_assembly_image();
     if img != 0 {
         for d in reader.create_type_definitions_for_image(img) {
             if TypeDefinition::new(d, reader).name == "WrapperController" {
-                wc = Some(d);
-                break;
+                return Some(d);
             }
         }
     }
-    if wc.is_none() {
-        for asm in reader.get_all_assembly_names() {
-            if asm == "Assembly-CSharp" {
-                continue;
-            }
-            let img = reader.read_assembly_image_by_name(&asm);
-            if img == 0 {
-                continue;
-            }
-            if let Some(d) = reader
-                .create_type_definitions_for_image(img)
-                .into_iter()
-                .find(|d| TypeDefinition::new(*d, reader).name == "WrapperController")
-            {
-                wc = Some(d);
-                break;
-            }
+    for asm in reader.get_all_assembly_names() {
+        if asm == "Assembly-CSharp" {
+            continue;
+        }
+        let img = reader.read_assembly_image_by_name(&asm);
+        if img == 0 {
+            continue;
+        }
+        if let Some(d) = reader
+            .create_type_definitions_for_image(img)
+            .into_iter()
+            .find(|d| TypeDefinition::new(*d, reader).name == "WrapperController")
+        {
+            return Some(d);
         }
     }
-    let wc = wc?;
-    let wc_td = TypeDefinition::new(wc, reader);
+    None
+}
+
+/// Read the current WrapperController.Instance from a (cached) class address.
+/// Cheap: just reads the static field. Null during a match (Wrapper unloaded).
+pub fn wrapper_instance(reader: &MonoReader, wc_addr: usize) -> Option<usize> {
+    let wc_td = TypeDefinition::new(wc_addr, reader);
     let (inst_addr, _ti) = wc_td.get_static_value("<Instance>k__BackingField");
     let inst = reader.read_ptr(inst_addr);
     if dvalid(inst) { Some(inst) } else { None }
 }
 
-/// Read all saved decks (name, deckId, format/attributes, per-pile card lists).
-pub fn read_decks(process_name: String) -> Value {
+/// Acquire a fresh reader, find WrapperController + its live instance, then run
+/// `f`. Used by the non-session (one-off) entry points and the debug server.
+fn with_wrapper<F>(process_name: String, f: F) -> Value
+where
+    F: FnOnce(&MonoReader, usize) -> Value,
+{
     let mut reader = match crate::get_reader(process_name) {
         Some(r) => r,
         None => return json!({ "error": "could not open MTGA process (run elevated)" }),
     };
-    let instance = match wrapper_instance(&mut reader) {
+    let wc = match find_wrapper_controller(&mut reader) {
+        Some(w) => w,
+        None => return json!({ "error": "WrapperController not found" }),
+    };
+    let instance = match wrapper_instance(&reader, wc) {
         Some(i) => i,
         None => return json!({ "error": "WrapperController.Instance is null (must be on the home screen, not in a match)" }),
     };
-    let reader: &MonoReader = &reader;
+    f(&reader, instance)
+}
 
+/// Read all saved decks (name, deckId, format/attributes, per-pile card lists).
+pub fn decks_from(reader: &MonoReader, instance: usize) -> Value {
     let all_decks = ref_field(reader, instance, "DecksManager")
         .and_then(|dm| ref_field(reader, dm, "_deckDataProvider"))
         .and_then(|dp| ref_field(reader, dp, "_allDecks"));
@@ -342,17 +355,7 @@ fn read_uint_int_dict(r: &MonoReader, dict: usize) -> Vec<(u32, i32)> {
 }
 
 /// Read the player's account identity (from AccountInformation).
-pub fn read_account(process_name: String) -> Value {
-    let mut reader = match crate::get_reader(process_name) {
-        Some(r) => r,
-        None => return json!({ "error": "could not open MTGA process (run elevated)" }),
-    };
-    let instance = match wrapper_instance(&mut reader) {
-        Some(i) => i,
-        None => return json!({ "error": "WrapperController.Instance is null (must be on the home screen, not in a match)" }),
-    };
-    let reader: &MonoReader = &reader;
-
+pub fn account_from(reader: &MonoReader, instance: usize) -> Value {
     let ai = ref_field(reader, instance, "<AccountClient>k__BackingField")
         .and_then(|ac| ref_field(reader, ac, "<AccountInformation>k__BackingField"));
     let ai = match ai {
@@ -373,17 +376,7 @@ pub fn read_account(process_name: String) -> Value {
 }
 
 /// Read the player's owned-card collection (grpId -> quantity).
-pub fn read_collection(process_name: String) -> Value {
-    let mut reader = match crate::get_reader(process_name) {
-        Some(r) => r,
-        None => return json!({ "error": "could not open MTGA process (run elevated)" }),
-    };
-    let instance = match wrapper_instance(&mut reader) {
-        Some(i) => i,
-        None => return json!({ "error": "WrapperController.Instance is null (must be on the home screen, not in a match)" }),
-    };
-    let reader: &MonoReader = &reader;
-
+pub fn collection_from(reader: &MonoReader, instance: usize) -> Value {
     let cards = ref_field(reader, instance, "<InventoryManager>k__BackingField")
         .and_then(|im| ref_field(reader, im, "InventoryServiceWrapper"))
         .and_then(|w| ref_field(reader, w, "<Cards>k__BackingField"));
@@ -401,17 +394,7 @@ pub fn read_collection(process_name: String) -> Value {
 }
 
 /// Read the player's wallet/inventory (gems, gold, wildcards, vault, ...).
-pub fn read_inventory(process_name: String) -> Value {
-    let mut reader = match crate::get_reader(process_name) {
-        Some(r) => r,
-        None => return json!({ "error": "could not open MTGA process (run elevated)" }),
-    };
-    let instance = match wrapper_instance(&mut reader) {
-        Some(i) => i,
-        None => return json!({ "error": "WrapperController.Instance is null (must be on the home screen, not in a match)" }),
-    };
-    let reader: &MonoReader = &reader;
-
+pub fn inventory_from(reader: &MonoReader, instance: usize) -> Value {
     let inv = ref_field(reader, instance, "<InventoryManager>k__BackingField")
         .and_then(|im| ref_field(reader, im, "InventoryServiceWrapper"))
         .and_then(|w| ref_field(reader, w, "m_inventory"));
@@ -437,17 +420,7 @@ pub fn read_inventory(process_name: String) -> Value {
 }
 
 /// Read the player's constructed + limited rank info.
-pub fn read_ranks(process_name: String) -> Value {
-    let mut reader = match crate::get_reader(process_name) {
-        Some(r) => r,
-        None => return json!({ "error": "could not open MTGA process (run elevated)" }),
-    };
-    let instance = match wrapper_instance(&mut reader) {
-        Some(i) => i,
-        None => return json!({ "error": "WrapperController.Instance is null (must be on the home screen, not in a match)" }),
-    };
-    let reader: &MonoReader = &reader;
-
+pub fn ranks_from(reader: &MonoReader, instance: usize) -> Value {
     let cri = ref_field(reader, instance, "<PlayerRankServiceWrapper>k__BackingField")
         .and_then(|w| ref_field(reader, w, "_combinedRankInfo"));
     let cri = match cri {
@@ -476,4 +449,32 @@ pub fn read_ranks(process_name: String) -> Value {
         "constructed": one("constructed"),
         "limited": one("limited"),
     })
+}
+
+// ---- One-off entry points (open a fresh reader + locate WrapperController per
+// call). The NAPI layer prefers a cached session when init() was called. ----
+
+/// Read the player's account identity (from AccountInformation).
+pub fn read_account(process_name: String) -> Value {
+    with_wrapper(process_name, account_from)
+}
+
+/// Read the player's owned-card collection (grpId -> quantity).
+pub fn read_collection(process_name: String) -> Value {
+    with_wrapper(process_name, collection_from)
+}
+
+/// Read the player's wallet/inventory (gems, gold, wildcards, vault, ...).
+pub fn read_inventory(process_name: String) -> Value {
+    with_wrapper(process_name, inventory_from)
+}
+
+/// Read the player's constructed + limited rank info.
+pub fn read_ranks(process_name: String) -> Value {
+    with_wrapper(process_name, ranks_from)
+}
+
+/// Read all saved decks (name, deckId, format/attributes, per-pile card lists).
+pub fn read_decks(process_name: String) -> Value {
+    with_wrapper(process_name, decks_from)
 }

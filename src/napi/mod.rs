@@ -100,11 +100,13 @@ mod windows_backend {
         type_definition::TypeDefinition,
     };
 
-    pub struct ReaderWrapper(pub Option<MonoReader>);
+    /// Cached session: the reader plus the (expensive-to-find) WrapperController
+    /// class address, so polling the typed readers skips the assembly scan.
+    pub struct ReaderWrapper(pub Option<MonoReader>, pub usize);
     unsafe impl Send for ReaderWrapper {}
     unsafe impl Sync for ReaderWrapper {}
 
-    pub static READER: Mutex<ReaderWrapper> = Mutex::new(ReaderWrapper(None));
+    pub static READER: Mutex<ReaderWrapper> = Mutex::new(ReaderWrapper(None, 0));
 
     pub fn is_admin_impl() -> bool {
         MonoReader::is_admin()
@@ -130,15 +132,20 @@ mod windows_backend {
             return Err(Error::from_reason("Failed to read mono root domain"));
         }
 
+        // Pre-cache the WrapperController class so subsequent typed reads skip
+        // the (expensive) assembly scan.
+        mono_reader.read_assembly_image();
+        let wc = crate::queries::find_wrapper_controller(&mut mono_reader).unwrap_or(0);
+
         let mut wrapper = READER.lock().map_err(|_| Error::from_reason("Failed to lock reader"))?;
-        wrapper.0 = Some(mono_reader);
+        *wrapper = ReaderWrapper(Some(mono_reader), wc);
 
         Ok(true)
     }
 
     pub fn close_impl() -> Result<bool> {
         let mut wrapper = READER.lock().map_err(|_| Error::from_reason("Failed to lock reader"))?;
-        wrapper.0 = None;
+        *wrapper = ReaderWrapper(None, 0);
         Ok(true)
     }
 
@@ -610,24 +617,47 @@ mod windows_backend {
         crate::read_generic_instance(process_name.to_string(), address)
     }
 
+    /// Run a typed reader against the cached session if init() was called and the
+    /// WrapperController instance is live; otherwise fall back to a fresh read.
+    /// The fallback also self-heals a stale session (e.g. after a game restart).
+    fn session_or_fresh<F>(
+        process_name: &str,
+        from: F,
+        fresh: fn(String) -> serde_json::Value,
+    ) -> serde_json::Value
+    where
+        F: FnOnce(&MonoReader, usize) -> serde_json::Value,
+    {
+        if let Ok(guard) = READER.lock() {
+            if let Some(reader) = guard.0.as_ref() {
+                if guard.1 != 0 {
+                    if let Some(inst) = crate::queries::wrapper_instance(reader, guard.1) {
+                        return from(reader, inst);
+                    }
+                }
+            }
+        }
+        fresh(process_name.to_string())
+    }
+
     pub fn read_decks_impl(process_name: &str) -> serde_json::Value {
-        crate::read_decks(process_name.to_string())
+        session_or_fresh(process_name, crate::queries::decks_from, crate::read_decks)
     }
 
     pub fn read_ranks_impl(process_name: &str) -> serde_json::Value {
-        crate::read_ranks(process_name.to_string())
+        session_or_fresh(process_name, crate::queries::ranks_from, crate::read_ranks)
     }
 
     pub fn read_account_impl(process_name: &str) -> serde_json::Value {
-        crate::read_account(process_name.to_string())
+        session_or_fresh(process_name, crate::queries::account_from, crate::read_account)
     }
 
     pub fn read_collection_impl(process_name: &str) -> serde_json::Value {
-        crate::read_collection(process_name.to_string())
+        session_or_fresh(process_name, crate::queries::collection_from, crate::read_collection)
     }
 
     pub fn read_inventory_impl(process_name: &str) -> serde_json::Value {
-        crate::read_inventory(process_name.to_string())
+        session_or_fresh(process_name, crate::queries::inventory_from, crate::read_inventory)
     }
 }
 
