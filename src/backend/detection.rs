@@ -123,16 +123,18 @@ pub fn find_process_by_name(name: &str) -> Option<Pid> {
 /// Create a backend for the given process
 /// Returns the appropriate backend (Mono or IL2CPP) based on runtime detection
 pub fn create_backend(pid: u32) -> Result<super::BoxedBackend, super::BackendError> {
+    #[cfg(any(feature = "mono", feature = "il2cpp"))]
+    use super::RuntimeBackend;
+
     let runtime = detect_runtime(pid);
 
     match runtime {
         RuntimeType::Mono => {
             #[cfg(feature = "mono")]
             {
-                // Will be implemented in mono module
-                // let backend = crate::mono::MonoBackend::new(pid);
-                // Ok(Box::new(backend))
-                Err(super::BackendError::Other("Mono backend not yet integrated".to_string()))
+                let mut backend = crate::mono::MonoBackend::new(pid)?;
+                backend.initialize()?;
+                Ok(Box::new(backend))
             }
             #[cfg(not(feature = "mono"))]
             {
@@ -142,10 +144,15 @@ pub fn create_backend(pid: u32) -> Result<super::BoxedBackend, super::BackendErr
         RuntimeType::Il2Cpp => {
             #[cfg(feature = "il2cpp")]
             {
-                // Will be implemented in il2cpp module
-                // let backend = crate::il2cpp::Il2CppBackend::new(pid);
-                // Ok(Box::new(backend))
-                Err(super::BackendError::Other("IL2CPP backend not yet integrated".to_string()))
+                // macOS uses the mach-based memory reader; other platforms use
+                // the process-memory handle.
+                #[cfg(target_os = "macos")]
+                let mut backend = crate::il2cpp::Il2CppBackend::new_macos(pid)?;
+                #[cfg(not(target_os = "macos"))]
+                let mut backend = crate::il2cpp::Il2CppBackend::new(pid)?;
+
+                backend.initialize()?;
+                Ok(Box::new(backend))
             }
             #[cfg(not(feature = "il2cpp"))]
             {

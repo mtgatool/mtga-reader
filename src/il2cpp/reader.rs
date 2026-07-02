@@ -49,14 +49,22 @@ unsafe impl Send for Il2CppBackend {}
 unsafe impl Sync for Il2CppBackend {}
 
 impl Il2CppBackend {
-    /// Create a new IL2CPP backend for the given process ID
-    pub fn new(pid: u32) -> Self {
+    /// Create a new IL2CPP backend for the given process ID.
+    ///
+    /// Returns an error instead of panicking when the process handle cannot be
+    /// acquired (e.g. `PermissionDenied` when the caller is not elevated).
+    pub fn new(pid: u32) -> Result<Self, BackendError> {
         #[cfg(any(target_os = "windows", target_os = "linux"))]
         let handle = (pid as process_memory::Pid)
             .try_into_process_handle()
-            .expect("Failed to get process handle");
+            .map_err(|e| {
+                BackendError::ProcessNotFound(format!(
+                    "Failed to open process {} (are you running elevated?): {}",
+                    pid, e
+                ))
+            })?;
 
-        Il2CppBackend {
+        Ok(Il2CppBackend {
             pid,
             #[cfg(any(target_os = "windows", target_os = "linux"))]
             handle,
@@ -69,7 +77,7 @@ impl Il2CppBackend {
             type_count: 0,
             metadata: None,
             initialized: false,
-        }
+        })
     }
 
     /// Create a new IL2CPP backend for macOS with mach memory reader

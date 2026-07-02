@@ -24,20 +24,28 @@ unsafe impl Send for MonoBackend {}
 unsafe impl Sync for MonoBackend {}
 
 impl MonoBackend {
-    /// Create a new Mono backend for the given process ID
-    pub fn new(pid: u32) -> Self {
+    /// Create a new Mono backend for the given process ID.
+    ///
+    /// Returns an error instead of panicking when the process handle cannot be
+    /// acquired (e.g. `PermissionDenied` when the caller is not elevated).
+    pub fn new(pid: u32) -> Result<Self, BackendError> {
         let handle = (pid as process_memory::Pid)
             .try_into_process_handle()
-            .expect("Failed to get process handle");
+            .map_err(|e| {
+                BackendError::ProcessNotFound(format!(
+                    "Failed to open process {} (are you running elevated?): {}",
+                    pid, e
+                ))
+            })?;
 
-        MonoBackend {
+        Ok(MonoBackend {
             pid,
             handle,
             offsets: MonoOffsets::default(),
             mono_root_domain: 0,
             assembly_image_address: 0,
             initialized: false,
-        }
+        })
     }
 
     /// Set custom offsets (for different Unity versions)

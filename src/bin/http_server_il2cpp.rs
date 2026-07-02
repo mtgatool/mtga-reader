@@ -1054,18 +1054,27 @@ struct MemReader {
 
 impl MemReader {
     fn new(pid: u32) -> Self {
+        // This IL2CPP server relies on macOS mach APIs; on other platforms it
+        // compiles to a non-functional stub so `cargo build --bins` succeeds.
+        #[cfg(target_os = "macos")]
         let task_port = unsafe {
             let mut task: u32 = 0;
             mach2::traps::task_for_pid(mach2::traps::mach_task_self(), pid as i32, &mut task);
             task
+        };
+        #[cfg(not(target_os = "macos"))]
+        let task_port = {
+            let _ = pid;
+            0u32
         };
         MemReader { task_port }
     }
 
     fn read_bytes(&self, addr: usize, size: usize) -> Vec<u8> {
         let mut buffer = vec![0u8; size];
-        let mut out_size: u64 = 0;
+        #[cfg(target_os = "macos")]
         unsafe {
+            let mut out_size: u64 = 0;
             mach2::vm::mach_vm_read_overwrite(
                 self.task_port,
                 addr as u64,
@@ -1073,6 +1082,10 @@ impl MemReader {
                 buffer.as_mut_ptr() as u64,
                 &mut out_size,
             );
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = addr;
         }
         buffer
     }
