@@ -63,3 +63,10 @@ export declare function getDictionary(address: number): DictionaryData
 export declare function readData(processName: string, fields: Array<string>): any
 export declare function readClass(processName: string, address: number): any
 export declare function readGenericInstance(processName: string, address: number): any
+/**
+ * Read all saved decks (name, deckId, format/attributes, per-pile card lists).
+ * Home screen only — returns an error object during a match.
+ */
+export declare function readDecks(processName: string): any
+/** Read the player's constructed + limited rank info. */
+export declare function readRanks(processName: string): any

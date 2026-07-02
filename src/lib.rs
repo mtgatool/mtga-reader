@@ -15,6 +15,12 @@ pub mod napi;
 // Public Rust API (always available)
 pub mod api;
 
+// High-level structured queries (decks, ranks) — Windows/Mono for now
+#[cfg(target_os = "windows")]
+pub mod queries;
+#[cfg(target_os = "windows")]
+pub use queries::{read_decks, read_ranks};
+
 // Legacy modules (kept for backward compatibility)
 pub mod constants;
 pub mod field_definition;

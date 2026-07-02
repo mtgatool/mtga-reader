@@ -609,6 +609,14 @@ mod windows_backend {
     pub fn read_generic_instance_impl(process_name: &str, address: i64) -> serde_json::Value {
         crate::read_generic_instance(process_name.to_string(), address)
     }
+
+    pub fn read_decks_impl(process_name: &str) -> serde_json::Value {
+        crate::read_decks(process_name.to_string())
+    }
+
+    pub fn read_ranks_impl(process_name: &str) -> serde_json::Value {
+        crate::read_ranks(process_name.to_string())
+    }
 }
 
 // ============================================================================
@@ -1331,6 +1339,14 @@ mod macos_backend {
             Err(e) => serde_json::json!({ "error": e.to_string() })
         }
     }
+
+    pub fn read_decks_impl(_process_name: &str) -> serde_json::Value {
+        serde_json::json!({ "error": "read_decks not implemented for the IL2CPP backend" })
+    }
+
+    pub fn read_ranks_impl(_process_name: &str) -> serde_json::Value {
+        serde_json::json!({ "error": "read_ranks not implemented for the IL2CPP backend" })
+    }
 }
 
 // ============================================================================
@@ -1512,6 +1528,33 @@ pub fn read_generic_instance(process_name: String, address: i64) -> serde_json::
 
     #[cfg(target_os = "macos")]
     { macos_backend::read_generic_instance_impl(&process_name, address) }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    { serde_json::json!({ "error": "Platform not supported" }) }
+}
+
+/// Read all saved decks (name, deckId, format/attributes, per-pile card lists).
+/// Home screen only — returns an error object during a match.
+#[napi]
+pub fn read_decks(process_name: String) -> serde_json::Value {
+    #[cfg(target_os = "windows")]
+    { windows_backend::read_decks_impl(&process_name) }
+
+    #[cfg(target_os = "macos")]
+    { macos_backend::read_decks_impl(&process_name) }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    { serde_json::json!({ "error": "Platform not supported" }) }
+}
+
+/// Read the player's constructed + limited rank info.
+#[napi]
+pub fn read_ranks(process_name: String) -> serde_json::Value {
+    #[cfg(target_os = "windows")]
+    { windows_backend::read_ranks_impl(&process_name) }
+
+    #[cfg(target_os = "macos")]
+    { macos_backend::read_ranks_impl(&process_name) }
 
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     { serde_json::json!({ "error": "Platform not supported" }) }
