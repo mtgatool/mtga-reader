@@ -35,8 +35,12 @@ impl FieldDefinition {
                 let mono_generic_ins_ptr = reader.read_ptr(mono_generic_context_ptr);
 
                 // var argument_count = this.Process.ReadInt32(mono_generic_ins_ptr + 0x4);
-                let argument_count =
-                    reader.read_u32(mono_generic_container_address + (4 * constants::SIZE_OF_PTR));
+                // Cap the count: on stale/garbage pointers (e.g. an object the GC
+                // has moved) this can read as a huge value and loop effectively
+                // forever. Real generic arities are tiny.
+                let argument_count = reader
+                    .read_u32(mono_generic_container_address + (4 * constants::SIZE_OF_PTR))
+                    .min(32);
                 let type_arg_v_ptr = mono_generic_ins_ptr + 0x8;
 
                 for i in 0..argument_count {
