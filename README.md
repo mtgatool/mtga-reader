@@ -86,6 +86,11 @@ Tests the full API including assembly enumeration, class inspection, and data re
 
 ## Development
 
+> **Platform status:** the high-level typed readers (`readDecks`, `readRanks`,
+> `readAccount`, `readCollection`, `readInventory`) are implemented and verified on
+> **Windows/Mono**. The **macOS/IL2CPP** backend returns "not implemented" for these —
+> see [docs/MACOS_IL2CPP_HANDOFF.md](docs/MACOS_IL2CPP_HANDOFF.md) to bring it to parity.
+
 ### Prerequisites
 
 - Rust toolchain (stable)
