@@ -37,7 +37,7 @@ async function main() {
 
     const path = isMacOS
         ? ['PAPA', '<InventoryManager>k__BackingField', '_inventoryServiceWrapper', '<Cards>k__BackingField']
-        : ['WrapperController', '<Instance>k__BackingField', '<InventoryManager>k__BackingField', '_inventoryServiceWrapper', '<Cards>k__BackingField'];
+        : ['WrapperController', '<Instance>k__BackingField', '<InventoryManager>k__BackingField', 'InventoryServiceWrapper', '<Cards>k__BackingField'];
 
     const cards = mtga.readData('MTGA', path);
 

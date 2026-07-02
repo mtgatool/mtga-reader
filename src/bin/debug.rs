@@ -16,7 +16,13 @@ fn main() {
     let process_name = "MTGA";
     let pid = MonoReader::find_pid_by_name(&process_name).expect("MTGA not found");
 
-    let mut mono_reader = MonoReader::new(pid.as_u32());
+    let mut mono_reader = match MonoReader::new(pid.as_u32()) {
+        Ok(reader) => reader,
+        Err(e) => {
+            println!("✗ Failed to open MTGA process (run elevated/as admin): {}", e);
+            return;
+        }
+    };
     let _mono_root = mono_reader.read_mono_root_domain();
 
     // Step 1: Find WrapperController
@@ -356,11 +362,38 @@ fn main() {
         );
     }
 
-    // Step 5: Read _inventoryServiceWrapper field from InventoryManager
-    println!("\n=== Step 5: Reading _inventoryServiceWrapper from InventoryManager ===\n");
-    let inventory_service_wrapper_field = inv_mgr_fields.iter().find_map(|field_addr| {
+    // Step 5: Read InventoryServiceWrapper field from InventoryManager
+    // NOTE: In current MTGA builds this field was renamed from the old private
+    // "_inventoryServiceWrapper" to the public "InventoryServiceWrapper", AND it
+    // is now declared on a BASE class of InventoryManager, so we must walk the
+    // class hierarchy (own fields alone no longer contain it).
+    println!("\n=== Step 5: Reading InventoryServiceWrapper from InventoryManager ===\n");
+
+    // Collect own + inherited fields by walking the parent chain.
+    let mut inv_mgr_all_fields: Vec<usize> = Vec::new();
+    {
+        let mut current = inv_mgr_class;
+        let mut depth = 0;
+        while current > 0x10000 && depth < 16 {
+            let td = TypeDefinition::new(current, &mono_reader);
+            if td.name.is_empty() || td.name.len() > 200 {
+                break;
+            }
+            if td.field_count > 0 && td.field_count < 4000 {
+                inv_mgr_all_fields.extend(td.get_fields());
+            }
+            let parent = td.parent_addr;
+            if parent == 0 || parent == current {
+                break;
+            }
+            current = parent;
+            depth += 1;
+        }
+    }
+
+    let inventory_service_wrapper_field = inv_mgr_all_fields.iter().find_map(|field_addr| {
         let field_def = FieldDefinition::new(*field_addr, &mono_reader);
-        if field_def.name == "_inventoryServiceWrapper" {
+        if field_def.name == "InventoryServiceWrapper" || field_def.name == "_inventoryServiceWrapper" {
             Some(field_def)
         } else {
             None

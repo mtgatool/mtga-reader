@@ -189,15 +189,32 @@ impl<'a> TypeDefinition<'a> {
     }
 
     pub fn get_field(&self, field_name: &str) -> (usize, TypeInfo) {
-        let fields = self.get_fields();
-        for field in fields {
-            let field_def = FieldDefinition::new(field, self.reader);
-            let type_info = field_def.type_info.clone();
-            // let code = field_def.type_info.code();
-            // println!("  field: {}, {}", field_def.name, code);
-            if field_def.name == field_name {
-                return (field, type_info);
+        // Walk the class hierarchy (self, then base classes) so that fields
+        // declared on a parent class are resolvable too. Mono lays out inherited
+        // fields at object-base-relative offsets, so a parent field's `offset`
+        // is valid against the derived instance base.
+        let mut current = self.address;
+        let mut depth = 0;
+        while current != 0 && current > 0x10000 && depth < 16 {
+            let class = TypeDefinition::new(current, self.reader);
+
+            // Guard against corrupted/huge field_count values (e.g. some system
+            // generic classes report bogus counts) that would cause huge scans.
+            if class.field_count > 0 && class.field_count < 4000 {
+                for field in class.get_fields() {
+                    let field_def = FieldDefinition::new(field, self.reader);
+                    if field_def.name == field_name {
+                        return (field, field_def.type_info);
+                    }
+                }
             }
+
+            let parent = class.parent_addr;
+            if parent == current {
+                break;
+            }
+            current = parent;
+            depth += 1;
         }
         return (0, TypeInfo::new(0, self.reader));
     }

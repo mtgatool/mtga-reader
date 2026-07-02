@@ -23,17 +23,20 @@ pub struct MonoReader {
 }
 
 impl MonoReader {
-    pub fn new(pid: u32) -> Self {
-        let handle = (pid as process_memory::Pid)
-            .try_into_process_handle()
-            .unwrap();
+    /// Open a handle to the target process.
+    ///
+    /// Returns an error instead of panicking when the process handle cannot be
+    /// acquired. On Windows this most commonly fails with `PermissionDenied`
+    /// (OS error 5) when the caller is not elevated but the target (MTGA) is.
+    pub fn new(pid: u32) -> std::io::Result<Self> {
+        let handle = (pid as process_memory::Pid).try_into_process_handle()?;
 
-        MonoReader {
+        Ok(MonoReader {
             pid,
             handle,
             mono_root_domain: 0,
             assembly_image_address: 0,
-        }
+        })
     }
 
     pub fn find_pid_by_name(name: &str) -> Option<Pid> {

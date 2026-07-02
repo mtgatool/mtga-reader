@@ -125,7 +125,7 @@ try {
             'WrapperController',
             '<Instance>k__BackingField',
             '<InventoryManager>k__BackingField',
-            '_inventoryServiceWrapper',
+            'InventoryServiceWrapper',
             '<Cards>k__BackingField',
         ];
 

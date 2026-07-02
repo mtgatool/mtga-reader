@@ -118,7 +118,12 @@ mod windows_backend {
         let pid = MonoReader::find_pid_by_name(process_name)
             .ok_or_else(|| Error::from_reason("Process not found"))?;
 
-        let mut mono_reader = MonoReader::new(pid.as_u32());
+        let mut mono_reader = MonoReader::new(pid.as_u32()).map_err(|e| {
+            Error::from_reason(format!(
+                "Failed to open process (are you running elevated?): {}",
+                e
+            ))
+        })?;
         let mono_root = mono_reader.read_mono_root_domain();
 
         if mono_root == 0 {

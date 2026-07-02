@@ -46,7 +46,17 @@ pub fn get_reader(process_name: String) -> Option<MonoReader> {
 
     let pid = pid.iter().next().unwrap();
 
-    let mut mono_reader = MonoReader::new(pid.as_u32());
+    let mut mono_reader = match MonoReader::new(pid.as_u32()) {
+        Ok(reader) => reader,
+        Err(e) => {
+            eprintln!(
+                "Failed to open process {} (are you running elevated?): {}",
+                pid.as_u32(),
+                e
+            );
+            return None;
+        }
+    };
     mono_reader.read_mono_root_domain();
     mono_reader.read_assembly_image();
     return Some(mono_reader);

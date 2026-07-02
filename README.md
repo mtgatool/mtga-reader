@@ -30,7 +30,7 @@ if (mtga.findPidByName('MTGA')) {
         'WrapperController',
         '<Instance>k__BackingField',
         '<InventoryManager>k__BackingField',
-        '_inventoryServiceWrapper',
+        'InventoryServiceWrapper',
         '<Cards>k__BackingField',
         '_entries',
     ]);

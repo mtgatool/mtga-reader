@@ -804,7 +804,13 @@ async fn main() {
     println!("Found MTGA process with PID: {}", pid);
 
     // Initialize MonoReader
-    let mut mono_reader = MonoReader::new(pid.as_u32());
+    let mut mono_reader = match MonoReader::new(pid.as_u32()) {
+        Ok(reader) => reader,
+        Err(e) => {
+            eprintln!("Error: Failed to open MTGA process (run elevated/as admin): {}", e);
+            std::process::exit(1);
+        }
+    };
     let mono_root = mono_reader.read_mono_root_domain();
 
     if mono_root == 0 {
