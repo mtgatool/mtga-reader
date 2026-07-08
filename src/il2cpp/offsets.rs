@@ -126,25 +126,42 @@ pub struct Il2CppOffsets {
 
 impl Default for Il2CppOffsets {
     fn default() -> Self {
-        Self::unity_2021()
+        Self::unity_2022_3()
     }
 }
 
 impl Il2CppOffsets {
-    /// Offsets for Unity 2021.x IL2CPP (metadata v29+)
-    /// Updated with MTGA-discovered offsets (2026-01-24)
-    pub fn unity_2021() -> Self {
+    /// Offsets for Unity 2022.3 LTS IL2CPP, verified against MTG Arena.
+    ///
+    /// Ground-truth verification history:
+    /// - **2026-01-24**: first discovered via `test_il2cpp_offsets.rs`
+    ///   live probe (labeled "Unity 2021.x" at the time — the label
+    ///   was wrong, the numbers were right).
+    /// - **2026-04-11**: confirmed against MTGA client version
+    ///   `0.1.11790.1252588` (build date 2026-03-18), which ships
+    ///   `UnityPlayer.dylib` / `UnityPlayer.dll` stamped
+    ///   `2022.3.62f2 (7670c08855a9)`. Both the macOS and Windows
+    ///   Arena binaries are built from the same Unity 2022.3.62f2
+    ///   source tree (same build hash), but select different
+    ///   scripting backends: IL2CPP on macOS,
+    ///   Mono (`mono-2.0-bdwgc.dll`) on Windows. These offsets
+    ///   describe the IL2CPP path only.
+    ///
+    /// `class_fields=0x80` and `class_field_count=0x124` are
+    /// corrections against earlier guesses (0x70 / 0x11C); both are
+    /// live-verified on the MTGA 2022.3.62f2 macOS build.
+    pub fn unity_2022_3() -> Self {
         Il2CppOffsets {
-            version_name: "Unity 2021.x".to_string(),
+            version_name: "Unity 2022.3.62f2 (MTGA verified)".to_string(),
 
-            // Il2CppClass - verified from MTGA offset testing
+            // Il2CppClass - verified against MTGA Unity 2022.3.62f2
             class_image: 0x0,
             class_name: 0x10,
             class_namespace: 0x18,
             class_parent: 0x48,
-            class_fields: 0x80,      // CORRECTED: Was 0x70, verified at 0x80
-            class_field_count: 0x124, // CORRECTED: Was 0x11C, verified at 0x124
-            class_static_fields: 0xA8, // Verified correct
+            class_fields: 0x80,
+            class_field_count: 0x124,
+            class_static_fields: 0xA8,
             class_methods: 0x88,
             class_instance_size: 0xF8,
             class_flags: 0xFC,
@@ -181,12 +198,24 @@ impl Il2CppOffsets {
         }
     }
 
-    /// Offsets for Unity 2022.x IL2CPP
+    /// Deprecated: use [`unity_2022_3`] directly.
+    ///
+    /// Original discovery tagged these offsets as "Unity 2021.x" but
+    /// later version probing of the live MTGA build revealed they
+    /// actually came from Unity 2022.3.62f2 — the offsets were right
+    /// but the label was a guess. This alias is kept for backward
+    /// compatibility with callers that predate the rename.
+    #[deprecated(note = "MTGA is actually on Unity 2022.3.62f2; call `unity_2022_3` directly")]
+    pub fn unity_2021() -> Self {
+        Self::unity_2022_3()
+    }
+
+    /// Offsets for Unity 2022.x IL2CPP. Currently aliases
+    /// [`unity_2022_3`] because that's the only 2022.x minor verified
+    /// against MTGA. Future 2022.x minor releases may need their own
+    /// entries if struct layouts drift.
     pub fn unity_2022() -> Self {
-        // Same as 2021 for now
-        let mut offsets = Self::unity_2021();
-        offsets.version_name = "Unity 2022.x".to_string();
-        offsets
+        Self::unity_2022_3()
     }
 
     /// Offsets for Unity 2019/2020 IL2CPP (older metadata versions)
@@ -235,14 +264,17 @@ impl Il2CppOffsets {
     /// Get offsets for a specific Unity version string
     pub fn for_version(version: &str) -> Self {
         if version.starts_with("2022") {
-            Self::unity_2022()
+            Self::unity_2022_3()
         } else if version.starts_with("2021") {
-            Self::unity_2021()
+            // 2021.3 LTS shares enough struct layout with 2022.3 LTS
+            // that the verified 2022.3 offsets are a reasonable
+            // starting point, but no live 2021.x probe confirms this.
+            Self::unity_2022_3()
         } else if version.starts_with("2019") || version.starts_with("2020") {
             Self::unity_2019_2020()
         } else {
-            // Default to latest
-            Self::unity_2021()
+            // Default to the most recently verified version.
+            Self::unity_2022_3()
         }
     }
 }

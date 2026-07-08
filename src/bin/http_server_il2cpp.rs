@@ -21,7 +21,7 @@ use mtga_reader::il2cpp::Il2CppOffsets;
 
 // Helper to get shared offsets (inline for convenience)
 fn get_offsets() -> Il2CppOffsets {
-    Il2CppOffsets::unity_2021()
+    Il2CppOffsets::unity_2022_3()
 }
 
 // Response types (same as http_server_simple for compatibility)
