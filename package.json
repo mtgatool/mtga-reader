@@ -53,5 +53,8 @@
     "index.js",
     "index.d.ts",
     "*.node"
-  ]
+  ],
+  "dependencies": {
+    "sql.js": "^1.14.1"
+  }
 }
