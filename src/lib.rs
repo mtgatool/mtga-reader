@@ -21,6 +21,10 @@ pub mod queries;
 #[cfg(target_os = "windows")]
 pub use queries::{read_account, read_collection, read_decks, read_inventory, read_ranks};
 
+// Shared cached-reader session for the typed readers — Windows/Mono for now
+#[cfg(target_os = "windows")]
+pub mod session;
+
 // Legacy modules (kept for backward compatibility)
 pub mod constants;
 pub mod field_definition;

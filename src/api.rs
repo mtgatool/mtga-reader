@@ -91,3 +91,81 @@ pub fn read_generic_instance(process_name: &str, address: i64) -> JsonValue {
     let _ = (process_name, address);
     serde_json::json!({ "error": "Platform not supported" })
 }
+
+// ============================================================================
+// Cached session + high-level typed readers (Windows/Mono only for now)
+// ============================================================================
+
+/// Initialize a cached reader session for the typed readers. Scans assemblies
+/// once and caches the WrapperController class address so subsequent reads
+/// take ~10-20ms instead of a full ~4s assembly scan.
+#[cfg(target_os = "windows")]
+pub fn init(process_name: &str) -> Result<bool, String> {
+    crate::session::init(process_name)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn init(process_name: &str) -> Result<bool, String> {
+    let _ = process_name;
+    Err("Platform not supported".to_string())
+}
+
+/// Clear the cached reader session.
+#[cfg(target_os = "windows")]
+pub fn close() -> Result<bool, String> {
+    crate::session::close()
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn close() -> Result<bool, String> {
+    Ok(false)
+}
+
+/// Whether a cached reader session is active.
+#[cfg(target_os = "windows")]
+pub fn is_initialized() -> bool {
+    crate::session::is_initialized()
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn is_initialized() -> bool {
+    false
+}
+
+macro_rules! typed_reader {
+    ($(#[$doc:meta])* $name:ident) => {
+        $(#[$doc])*
+        #[cfg(target_os = "windows")]
+        pub fn $name(process_name: &str) -> JsonValue {
+            crate::session::$name(process_name)
+        }
+
+        $(#[$doc])*
+        #[cfg(not(target_os = "windows"))]
+        pub fn $name(process_name: &str) -> JsonValue {
+            let _ = process_name;
+            serde_json::json!({ "error": concat!(stringify!($name), " is not supported on this platform yet") })
+        }
+    };
+}
+
+typed_reader! {
+    /// Read the saved decks (names, attributes, piles of {grpId, qty}).
+    read_decks
+}
+typed_reader! {
+    /// Read constructed/limited rank info for the logged-in player.
+    read_ranks
+}
+typed_reader! {
+    /// Read account identity (displayName, accountId, personaId, ...).
+    read_account
+}
+typed_reader! {
+    /// Read the card collection as {count, cards: [{grpId, qty}]}.
+    read_collection
+}
+typed_reader! {
+    /// Read inventory (gems, gold, wildcards, vault progress, ...).
+    read_inventory
+}

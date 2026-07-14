@@ -39,6 +39,11 @@ impl MonoReader {
         })
     }
 
+    /// The pid this reader was opened against.
+    pub fn pid(&self) -> u32 {
+        self.pid
+    }
+
     pub fn find_pid_by_name(name: &str) -> Option<Pid> {
         let mut sys = System::new_all();
         sys.refresh_all();
