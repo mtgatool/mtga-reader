@@ -15,7 +15,8 @@ pub mod napi;
 // Public Rust API (always available)
 pub mod api;
 
-// High-level structured queries (decks, ranks) — Windows/Mono for now
+// High-level structured queries (decks, ranks) — Mono backend (Windows, and
+// Linux via Wine which runs the same Windows binary).
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 pub mod queries;
 #[cfg(any(target_os = "windows", target_os = "linux"))]
