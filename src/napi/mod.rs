@@ -2,7 +2,15 @@
 //!
 //! This module provides cross-platform Node.js bindings for reading MTGA memory.
 //! - Windows: Uses Mono backend
+//! - Linux: Uses the Mono backend too (MTGA runs the Windows binary under Wine)
 //! - macOS: Uses IL2CPP backend
+//!
+//! Every function that touches the game process (init, find_process and the
+//! read_* family) runs on libuv's threadpool via AsyncTask and returns a
+//! Promise, so a slow memory read never blocks the caller's JS event loop —
+//! critical in Electron, where the renderer hosting the GRE parser would
+//! otherwise freeze. Trivial in-process checks (is_admin, is_initialized,
+//! close) and the session-based debug explorer APIs (get_*) stay synchronous.
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
@@ -12,6 +20,71 @@ use std::sync::Mutex;
 
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 use sysinfo::{Pid, System};
+
+// ============================================================================
+// Threadpool task plumbing: wraps a blocking closure so #[napi] functions can
+// return AsyncTask<...> (a JS Promise) with the work off the JS thread.
+// ============================================================================
+
+pub struct JsonTask {
+    run: Option<Box<dyn FnOnce() -> serde_json::Value + Send>>,
+}
+
+impl JsonTask {
+    fn spawn(f: impl FnOnce() -> serde_json::Value + Send + 'static) -> AsyncTask<JsonTask> {
+        AsyncTask::new(JsonTask {
+            run: Some(Box::new(f)),
+        })
+    }
+}
+
+impl napi::Task for JsonTask {
+    type Output = serde_json::Value;
+    // serde_json::Value implements ToNapiValue but not TypeName, so resolve
+    // through JsUnknown (converted on the JS thread via serde).
+    type JsValue = napi::JsUnknown;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        let run = self
+            .run
+            .take()
+            .ok_or_else(|| Error::from_reason("Task already ran"))?;
+        Ok(run())
+    }
+
+    fn resolve(&mut self, env: napi::Env, output: Self::Output) -> Result<Self::JsValue> {
+        env.to_js_value(&output)
+    }
+}
+
+pub struct BoolTask {
+    run: Option<Box<dyn FnOnce() -> Result<bool> + Send>>,
+}
+
+impl BoolTask {
+    fn spawn(f: impl FnOnce() -> Result<bool> + Send + 'static) -> AsyncTask<BoolTask> {
+        AsyncTask::new(BoolTask {
+            run: Some(Box::new(f)),
+        })
+    }
+}
+
+impl napi::Task for BoolTask {
+    type Output = bool;
+    type JsValue = bool;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        let run = self
+            .run
+            .take()
+            .ok_or_else(|| Error::from_reason("Task already ran"))?;
+        run()
+    }
+
+    fn resolve(&mut self, _env: napi::Env, output: Self::Output) -> Result<Self::JsValue> {
+        Ok(output)
+    }
+}
 
 // ============================================================================
 // Response types matching the HTTP server (cross-platform)
@@ -1398,28 +1471,35 @@ pub fn is_admin() -> bool {
     { false }
 }
 
+/// Async: process enumeration runs on the threadpool, resolves to a boolean.
 #[napi]
-pub fn find_process(process_name: String) -> bool {
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
-    { windows_backend::find_process_impl(&process_name) }
+pub fn find_process(process_name: String) -> AsyncTask<BoolTask> {
+    BoolTask::spawn(move || {
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        { Ok(windows_backend::find_process_impl(&process_name)) }
 
-    #[cfg(target_os = "macos")]
-    { macos_backend::find_process_impl(&process_name) }
+        #[cfg(target_os = "macos")]
+        { Ok(macos_backend::find_process_impl(&process_name)) }
 
-    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
-    { false }
+        #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+        { Ok(false) }
+    })
 }
 
+/// Async: session init scans the game's loaded assemblies (the expensive,
+/// multi-second step) — it runs on the threadpool and resolves when cached.
 #[napi]
-pub fn init(process_name: String) -> Result<bool> {
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
-    { windows_backend::init_impl(&process_name) }
+pub fn init(process_name: String) -> AsyncTask<BoolTask> {
+    BoolTask::spawn(move || {
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        { windows_backend::init_impl(&process_name) }
 
-    #[cfg(target_os = "macos")]
-    { macos_backend::init_impl(&process_name) }
+        #[cfg(target_os = "macos")]
+        { macos_backend::init_impl(&process_name) }
 
-    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
-    { Err(Error::from_reason("Platform not supported")) }
+        #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+        { Err(Error::from_reason("Platform not supported")) }
+    })
 }
 
 #[napi]
@@ -1531,103 +1611,119 @@ pub fn get_dictionary(address: i64) -> Result<DictionaryData> {
 }
 
 #[napi]
-pub fn read_data(process_name: String, fields: Vec<String>) -> serde_json::Value {
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
-    { windows_backend::read_data_impl(&process_name, fields) }
+pub fn read_data(process_name: String, fields: Vec<String>) -> AsyncTask<JsonTask> {
+    JsonTask::spawn(move || {
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        { windows_backend::read_data_impl(&process_name, fields) }
 
-    #[cfg(target_os = "macos")]
-    { macos_backend::read_data_impl(&process_name, fields) }
+        #[cfg(target_os = "macos")]
+        { macos_backend::read_data_impl(&process_name, fields) }
 
-    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
-    { serde_json::json!({ "error": "Platform not supported" }) }
+        #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+        { serde_json::json!({ "error": "Platform not supported" }) }
+    })
 }
 
 #[napi]
-pub fn read_class(process_name: String, address: i64) -> serde_json::Value {
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
-    { windows_backend::read_class_impl(&process_name, address) }
+pub fn read_class(process_name: String, address: i64) -> AsyncTask<JsonTask> {
+    JsonTask::spawn(move || {
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        { windows_backend::read_class_impl(&process_name, address) }
 
-    #[cfg(target_os = "macos")]
-    { macos_backend::read_class_impl(&process_name, address) }
+        #[cfg(target_os = "macos")]
+        { macos_backend::read_class_impl(&process_name, address) }
 
-    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
-    { serde_json::json!({ "error": "Platform not supported" }) }
+        #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+        { serde_json::json!({ "error": "Platform not supported" }) }
+    })
 }
 
 #[napi]
-pub fn read_generic_instance(process_name: String, address: i64) -> serde_json::Value {
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
-    { windows_backend::read_generic_instance_impl(&process_name, address) }
+pub fn read_generic_instance(process_name: String, address: i64) -> AsyncTask<JsonTask> {
+    JsonTask::spawn(move || {
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        { windows_backend::read_generic_instance_impl(&process_name, address) }
 
-    #[cfg(target_os = "macos")]
-    { macos_backend::read_generic_instance_impl(&process_name, address) }
+        #[cfg(target_os = "macos")]
+        { macos_backend::read_generic_instance_impl(&process_name, address) }
 
-    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
-    { serde_json::json!({ "error": "Platform not supported" }) }
+        #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+        { serde_json::json!({ "error": "Platform not supported" }) }
+    })
 }
 
 /// Read all saved decks (name, deckId, format/attributes, per-pile card lists).
 /// Home screen only — returns an error object during a match.
 #[napi]
-pub fn read_decks(process_name: String) -> serde_json::Value {
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
-    { windows_backend::read_decks_impl(&process_name) }
+pub fn read_decks(process_name: String) -> AsyncTask<JsonTask> {
+    JsonTask::spawn(move || {
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        { windows_backend::read_decks_impl(&process_name) }
 
-    #[cfg(target_os = "macos")]
-    { macos_backend::read_decks_impl(&process_name) }
+        #[cfg(target_os = "macos")]
+        { macos_backend::read_decks_impl(&process_name) }
 
-    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
-    { serde_json::json!({ "error": "Platform not supported" }) }
+        #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+        { serde_json::json!({ "error": "Platform not supported" }) }
+    })
 }
 
 /// Read the player's constructed + limited rank info.
 #[napi]
-pub fn read_ranks(process_name: String) -> serde_json::Value {
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
-    { windows_backend::read_ranks_impl(&process_name) }
+pub fn read_ranks(process_name: String) -> AsyncTask<JsonTask> {
+    JsonTask::spawn(move || {
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        { windows_backend::read_ranks_impl(&process_name) }
 
-    #[cfg(target_os = "macos")]
-    { macos_backend::read_ranks_impl(&process_name) }
+        #[cfg(target_os = "macos")]
+        { macos_backend::read_ranks_impl(&process_name) }
 
-    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
-    { serde_json::json!({ "error": "Platform not supported" }) }
+        #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+        { serde_json::json!({ "error": "Platform not supported" }) }
+    })
 }
 
 /// Read the player's account identity (displayName, accountId, personaId, ...).
 #[napi]
-pub fn read_account(process_name: String) -> serde_json::Value {
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
-    { windows_backend::read_account_impl(&process_name) }
+pub fn read_account(process_name: String) -> AsyncTask<JsonTask> {
+    JsonTask::spawn(move || {
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        { windows_backend::read_account_impl(&process_name) }
 
-    #[cfg(target_os = "macos")]
-    { macos_backend::read_account_impl(&process_name) }
+        #[cfg(target_os = "macos")]
+        { macos_backend::read_account_impl(&process_name) }
 
-    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
-    { serde_json::json!({ "error": "Platform not supported" }) }
+        #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+        { serde_json::json!({ "error": "Platform not supported" }) }
+    })
 }
 
 /// Read the player's owned-card collection (grpId -> quantity).
 #[napi]
-pub fn read_collection(process_name: String) -> serde_json::Value {
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
-    { windows_backend::read_collection_impl(&process_name) }
+pub fn read_collection(process_name: String) -> AsyncTask<JsonTask> {
+    JsonTask::spawn(move || {
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        { windows_backend::read_collection_impl(&process_name) }
 
-    #[cfg(target_os = "macos")]
-    { macos_backend::read_collection_impl(&process_name) }
+        #[cfg(target_os = "macos")]
+        { macos_backend::read_collection_impl(&process_name) }
 
-    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
-    { serde_json::json!({ "error": "Platform not supported" }) }
+        #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+        { serde_json::json!({ "error": "Platform not supported" }) }
+    })
 }
 
 /// Read the player's wallet/inventory (gems, gold, wildcards, vault, ...).
 #[napi]
-pub fn read_inventory(process_name: String) -> serde_json::Value {
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
-    { windows_backend::read_inventory_impl(&process_name) }
+pub fn read_inventory(process_name: String) -> AsyncTask<JsonTask> {
+    JsonTask::spawn(move || {
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        { windows_backend::read_inventory_impl(&process_name) }
 
-    #[cfg(target_os = "macos")]
-    { macos_backend::read_inventory_impl(&process_name) }
+        #[cfg(target_os = "macos")]
+        { macos_backend::read_inventory_impl(&process_name) }
 
-    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
-    { serde_json::json!({ "error": "Platform not supported" }) }
+        #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+        { serde_json::json!({ "error": "Platform not supported" }) }
+    })
 }

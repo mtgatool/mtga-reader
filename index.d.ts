@@ -49,8 +49,13 @@ export interface DictionaryData {
   entries: Array<DictionaryEntry>
 }
 export declare function isAdmin(): boolean
-export declare function findProcess(processName: string): boolean
-export declare function init(processName: string): boolean
+/** Async: process enumeration runs on the threadpool, resolves to a boolean. */
+export declare function findProcess(processName: string): Promise<unknown>
+/**
+ * Async: session init scans the game's loaded assemblies (the expensive,
+ * multi-second step) — it runs on the threadpool and resolves when cached.
+ */
+export declare function init(processName: string): Promise<unknown>
 export declare function close(): boolean
 export declare function isInitialized(): boolean
 export declare function getAssemblies(): Array<string>
@@ -60,19 +65,19 @@ export declare function getInstance(address: number): InstanceData
 export declare function getInstanceField(address: number, fieldName: string): any
 export declare function getStaticField(classAddress: number, fieldName: string): any
 export declare function getDictionary(address: number): DictionaryData
-export declare function readData(processName: string, fields: Array<string>): any
-export declare function readClass(processName: string, address: number): any
-export declare function readGenericInstance(processName: string, address: number): any
+export declare function readData(processName: string, fields: Array<string>): Promise<unknown>
+export declare function readClass(processName: string, address: number): Promise<unknown>
+export declare function readGenericInstance(processName: string, address: number): Promise<unknown>
 /**
  * Read all saved decks (name, deckId, format/attributes, per-pile card lists).
  * Home screen only — returns an error object during a match.
  */
-export declare function readDecks(processName: string): any
+export declare function readDecks(processName: string): Promise<unknown>
 /** Read the player's constructed + limited rank info. */
-export declare function readRanks(processName: string): any
+export declare function readRanks(processName: string): Promise<unknown>
 /** Read the player's account identity (displayName, accountId, personaId, ...). */
-export declare function readAccount(processName: string): any
+export declare function readAccount(processName: string): Promise<unknown>
 /** Read the player's owned-card collection (grpId -> quantity). */
-export declare function readCollection(processName: string): any
+export declare function readCollection(processName: string): Promise<unknown>
 /** Read the player's wallet/inventory (gems, gold, wildcards, vault, ...). */
-export declare function readInventory(processName: string): any
+export declare function readInventory(processName: string): Promise<unknown>
