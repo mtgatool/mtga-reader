@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(target_os = "macos")]
 use std::sync::Mutex;
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 use sysinfo::{Pid, System};
 
 // ============================================================================
@@ -91,7 +91,7 @@ pub struct DictionaryData {
 // Windows Backend (Mono)
 // ============================================================================
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 mod windows_backend {
     use super::*;
     use crate::{
@@ -672,6 +672,42 @@ mod macos_backend {
         pub fn read_u8(&self, addr: usize) -> u8 {
             let bytes = self.read_bytes(addr, 1);
             bytes.first().copied().unwrap_or(0)
+        }
+
+        // Build-parity typed reads (macOS output isn't wired up yet — see the
+        // IL2CPP handoff — but these let the typed readers compile).
+        pub fn read_i8(&self, addr: usize) -> i8 {
+            self.read_bytes(addr, 1).first().map(|&b| b as i8).unwrap_or(0)
+        }
+
+        pub fn read_u16(&self, addr: usize) -> u16 {
+            let bytes = self.read_bytes(addr, 2);
+            u16::from_le_bytes(bytes.try_into().unwrap_or([0; 2]))
+        }
+
+        pub fn read_i16(&self, addr: usize) -> i16 {
+            let bytes = self.read_bytes(addr, 2);
+            i16::from_le_bytes(bytes.try_into().unwrap_or([0; 2]))
+        }
+
+        pub fn read_u64(&self, addr: usize) -> u64 {
+            let bytes = self.read_bytes(addr, 8);
+            u64::from_le_bytes(bytes.try_into().unwrap_or([0; 8]))
+        }
+
+        pub fn read_i64(&self, addr: usize) -> i64 {
+            let bytes = self.read_bytes(addr, 8);
+            i64::from_le_bytes(bytes.try_into().unwrap_or([0; 8]))
+        }
+
+        pub fn read_f32(&self, addr: usize) -> f32 {
+            let bytes = self.read_bytes(addr, 4);
+            f32::from_le_bytes(bytes.try_into().unwrap_or([0; 4]))
+        }
+
+        pub fn read_f64(&self, addr: usize) -> f64 {
+            let bytes = self.read_bytes(addr, 8);
+            f64::from_le_bytes(bytes.try_into().unwrap_or([0; 8]))
         }
 
         pub fn read_string(&self, addr: usize) -> String {
@@ -1352,181 +1388,181 @@ mod macos_backend {
 
 #[napi]
 pub fn is_admin() -> bool {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     { windows_backend::is_admin_impl() }
 
     #[cfg(target_os = "macos")]
     { macos_backend::is_admin_impl() }
 
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
     { false }
 }
 
 #[napi]
 pub fn find_process(process_name: String) -> bool {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     { windows_backend::find_process_impl(&process_name) }
 
     #[cfg(target_os = "macos")]
     { macos_backend::find_process_impl(&process_name) }
 
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
     { false }
 }
 
 #[napi]
 pub fn init(process_name: String) -> Result<bool> {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     { windows_backend::init_impl(&process_name) }
 
     #[cfg(target_os = "macos")]
     { macos_backend::init_impl(&process_name) }
 
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
     { Err(Error::from_reason("Platform not supported")) }
 }
 
 #[napi]
 pub fn close() -> Result<bool> {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     { windows_backend::close_impl() }
 
     #[cfg(target_os = "macos")]
     { macos_backend::close_impl() }
 
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
     { Ok(true) }
 }
 
 #[napi]
 pub fn is_initialized() -> bool {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     { windows_backend::is_initialized_impl() }
 
     #[cfg(target_os = "macos")]
     { macos_backend::is_initialized_impl() }
 
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
     { false }
 }
 
 #[napi]
 pub fn get_assemblies() -> Result<Vec<String>> {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     { windows_backend::get_assemblies_impl() }
 
     #[cfg(target_os = "macos")]
     { macos_backend::get_assemblies_impl() }
 
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
     { Err(Error::from_reason("Platform not supported")) }
 }
 
 #[napi]
 pub fn get_assembly_classes(assembly_name: String) -> Result<Vec<ClassInfo>> {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     { windows_backend::get_assembly_classes_impl(&assembly_name) }
 
     #[cfg(target_os = "macos")]
     { macos_backend::get_assembly_classes_impl(&assembly_name) }
 
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
     { Err(Error::from_reason("Platform not supported")) }
 }
 
 #[napi]
 pub fn get_class_details(assembly_name: String, class_name: String) -> Result<ClassDetails> {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     { windows_backend::get_class_details_impl(&assembly_name, &class_name) }
 
     #[cfg(target_os = "macos")]
     { macos_backend::get_class_details_impl(&assembly_name, &class_name) }
 
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
     { Err(Error::from_reason("Platform not supported")) }
 }
 
 #[napi]
 pub fn get_instance(address: i64) -> Result<InstanceData> {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     { windows_backend::get_instance_impl(address) }
 
     #[cfg(target_os = "macos")]
     { macos_backend::get_instance_impl(address) }
 
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
     { Err(Error::from_reason("Platform not supported")) }
 }
 
 #[napi]
 pub fn get_instance_field(address: i64, field_name: String) -> Result<serde_json::Value> {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     { windows_backend::get_instance_field_impl(address, &field_name) }
 
     #[cfg(target_os = "macos")]
     { macos_backend::get_instance_field_impl(address, &field_name) }
 
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
     { Err(Error::from_reason("Platform not supported")) }
 }
 
 #[napi]
 pub fn get_static_field(class_address: i64, field_name: String) -> Result<serde_json::Value> {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     { windows_backend::get_static_field_impl(class_address, &field_name) }
 
     #[cfg(target_os = "macos")]
     { macos_backend::get_static_field_impl(class_address, &field_name) }
 
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
     { Err(Error::from_reason("Platform not supported")) }
 }
 
 #[napi]
 pub fn get_dictionary(address: i64) -> Result<DictionaryData> {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     { windows_backend::get_dictionary_impl(address) }
 
     #[cfg(target_os = "macos")]
     { macos_backend::get_dictionary_impl(address) }
 
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
     { Err(Error::from_reason("Platform not supported")) }
 }
 
 #[napi]
 pub fn read_data(process_name: String, fields: Vec<String>) -> serde_json::Value {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     { windows_backend::read_data_impl(&process_name, fields) }
 
     #[cfg(target_os = "macos")]
     { macos_backend::read_data_impl(&process_name, fields) }
 
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
     { serde_json::json!({ "error": "Platform not supported" }) }
 }
 
 #[napi]
 pub fn read_class(process_name: String, address: i64) -> serde_json::Value {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     { windows_backend::read_class_impl(&process_name, address) }
 
     #[cfg(target_os = "macos")]
     { macos_backend::read_class_impl(&process_name, address) }
 
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
     { serde_json::json!({ "error": "Platform not supported" }) }
 }
 
 #[napi]
 pub fn read_generic_instance(process_name: String, address: i64) -> serde_json::Value {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     { windows_backend::read_generic_instance_impl(&process_name, address) }
 
     #[cfg(target_os = "macos")]
     { macos_backend::read_generic_instance_impl(&process_name, address) }
 
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
     { serde_json::json!({ "error": "Platform not supported" }) }
 }
 
@@ -1534,64 +1570,64 @@ pub fn read_generic_instance(process_name: String, address: i64) -> serde_json::
 /// Home screen only — returns an error object during a match.
 #[napi]
 pub fn read_decks(process_name: String) -> serde_json::Value {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     { windows_backend::read_decks_impl(&process_name) }
 
     #[cfg(target_os = "macos")]
     { macos_backend::read_decks_impl(&process_name) }
 
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
     { serde_json::json!({ "error": "Platform not supported" }) }
 }
 
 /// Read the player's constructed + limited rank info.
 #[napi]
 pub fn read_ranks(process_name: String) -> serde_json::Value {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     { windows_backend::read_ranks_impl(&process_name) }
 
     #[cfg(target_os = "macos")]
     { macos_backend::read_ranks_impl(&process_name) }
 
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
     { serde_json::json!({ "error": "Platform not supported" }) }
 }
 
 /// Read the player's account identity (displayName, accountId, personaId, ...).
 #[napi]
 pub fn read_account(process_name: String) -> serde_json::Value {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     { windows_backend::read_account_impl(&process_name) }
 
     #[cfg(target_os = "macos")]
     { macos_backend::read_account_impl(&process_name) }
 
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
     { serde_json::json!({ "error": "Platform not supported" }) }
 }
 
 /// Read the player's owned-card collection (grpId -> quantity).
 #[napi]
 pub fn read_collection(process_name: String) -> serde_json::Value {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     { windows_backend::read_collection_impl(&process_name) }
 
     #[cfg(target_os = "macos")]
     { macos_backend::read_collection_impl(&process_name) }
 
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
     { serde_json::json!({ "error": "Platform not supported" }) }
 }
 
 /// Read the player's wallet/inventory (gems, gold, wildcards, vault, ...).
 #[napi]
 pub fn read_inventory(process_name: String) -> serde_json::Value {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     { windows_backend::read_inventory_impl(&process_name) }
 
     #[cfg(target_os = "macos")]
     { macos_backend::read_inventory_impl(&process_name) }
 
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
     { serde_json::json!({ "error": "Platform not supported" }) }
 }

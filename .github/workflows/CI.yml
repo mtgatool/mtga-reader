@@ -75,7 +75,7 @@ jobs:
           key: ${{ matrix.settings.target }}-cargo-${{ matrix.settings.host }}
 
       - name: Install dependencies
-        run: yarn install
+        run: yarn install --ignore-engines
 
       - name: Build in docker
         uses: addnab/docker-run-action@v3
@@ -114,7 +114,7 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: yarn
       - name: Install dependencies
-        run: yarn install
+        run: yarn install --ignore-engines
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -143,7 +143,7 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: yarn
       - name: Install dependencies
-        run: yarn install
+        run: yarn install --ignore-engines
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -172,7 +172,7 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: yarn
       - name: Install dependencies
-        run: yarn install
+        run: yarn install --ignore-engines
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -202,7 +202,7 @@ jobs:
           cache: yarn
 
       - name: Install dependencies
-        run: yarn install
+        run: yarn install --ignore-engines
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
