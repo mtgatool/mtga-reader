@@ -16,13 +16,13 @@ pub mod napi;
 pub mod api;
 
 // High-level structured queries (decks, ranks) — Windows/Mono for now
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 pub mod queries;
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 pub use queries::{read_account, read_collection, read_decks, read_inventory, read_ranks};
 
 // Shared cached-reader session for the typed readers — Windows/Mono for now
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 pub mod session;
 
 // Legacy modules (kept for backward compatibility)
@@ -46,7 +46,7 @@ use type_info::TypeInfo;
 use serde_json::json;
 
 // Utility fn to get the reader and initialize it (used by Windows backend)
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 pub fn get_reader(process_name: String) -> Option<MonoReader> {
     let pid = MonoReader::find_pid_by_name(&process_name);
 
@@ -72,7 +72,7 @@ pub fn get_reader(process_name: String) -> Option<MonoReader> {
     return Some(mono_reader);
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 pub fn get_def_by_name<'a>(
     defs: &'a Vec<usize>,
     name: String,
@@ -84,7 +84,7 @@ pub fn get_def_by_name<'a>(
     })
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 pub fn read_data(process_name: String, fields: Vec<String>) -> serde_json::Value {
     println!("Reading started...");
 
@@ -193,7 +193,7 @@ pub fn read_data(process_name: String, fields: Vec<String>) -> serde_json::Value
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 pub fn read_class(process_name: String, address: i64) -> serde_json::Value {
     let reader = get_reader(process_name);
 
@@ -223,7 +223,7 @@ pub fn read_class(process_name: String, address: i64) -> serde_json::Value {
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 pub fn read_generic_instance(process_name: String, address: i64) -> serde_json::Value {
     let reader = get_reader(process_name);
 
