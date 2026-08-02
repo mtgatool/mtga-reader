@@ -1,0 +1,22 @@
+{
+  "name": "mtga-reader-darwin-arm64",
+  "version": "0.0.0",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mtgatool/mtga-reader"
+  },
+  "main": "mtga-reader.darwin-arm64.node",
+  "files": [
+    "mtga-reader.darwin-arm64.node"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">= 10"
+  }
+}

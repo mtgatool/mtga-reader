@@ -11,6 +11,10 @@ pub mod field_definition;
 pub mod macho_reader;
 pub mod macos_memory;
 
+// Metadata-driven macOS runtime used by the typed readers.
+#[cfg(target_os = "macos")]
+pub mod macos_runtime;
+
 pub use reader::Il2CppBackend;
 pub use offsets::Il2CppOffsets;
 pub use metadata::MetadataParser;

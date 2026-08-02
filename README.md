@@ -6,7 +6,7 @@ A high-performance native library for reading Magic: The Gathering Arena game me
 
 ## Features
 
-- **Cross-platform** - Windows and Linux support with prebuilt binaries
+- **Cross-platform** - Windows, Linux and macOS support with prebuilt binaries
 - **Node.js bindings** - First-class npm package powered by [napi-rs](https://napi.rs)
 - **Memory introspection** - Browse assemblies, classes, instances, and dictionaries
 - **Zero runtime dependencies** - Pure Rust core with no external requirements
@@ -88,8 +88,9 @@ Tests the full API including assembly enumeration, class inspection, and data re
 
 > **Platform status:** the high-level typed readers (`readDecks`, `readRanks`,
 > `readAccount`, `readCollection`, `readInventory`) are implemented and verified on
-> **Windows/Mono**. The **macOS/IL2CPP** backend returns "not implemented" for these —
-> see [docs/MACOS_IL2CPP_HANDOFF.md](docs/MACOS_IL2CPP_HANDOFF.md) to bring it to parity.
+> **Windows/Mono** *and* **macOS/IL2CPP**, and return identical JSON shapes on both.
+> macOS needs root or the `com.apple.security.cs.debugger` entitlement for
+> `task_for_pid` — see [docs/MACOS_IL2CPP.md](docs/MACOS_IL2CPP.md).
 
 ### Prerequisites
 

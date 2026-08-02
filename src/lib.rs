@@ -26,6 +26,14 @@ pub use queries::{read_account, read_collection, read_decks, read_inventory, rea
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 pub mod session;
 
+// High-level structured queries — macOS/IL2CPP. Same JSON shapes as `queries`.
+#[cfg(target_os = "macos")]
+pub mod queries_il2cpp;
+#[cfg(target_os = "macos")]
+pub mod session_il2cpp;
+#[cfg(target_os = "macos")]
+pub use session_il2cpp::{read_account, read_collection, read_decks, read_inventory, read_ranks};
+
 // Legacy modules (kept for backward compatibility)
 pub mod constants;
 pub mod field_definition;
