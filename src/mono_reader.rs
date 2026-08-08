@@ -61,7 +61,13 @@ impl MonoReader {
         }
         #[cfg(target_os = "linux")]
         {
-            return sudo::check() == RunningAs::Root;
+            // Root is only one of three ways to qualify for reading another
+            // process' memory. A plain user with CAP_SYS_PTRACE, or any user at
+            // all under a permissive Yama policy, can call process_vm_readv
+            // just fine — reporting "not elevated" to them is a false alarm.
+            return sudo::check() == RunningAs::Root
+                || Self::has_cap_sys_ptrace()
+                || Self::yama_allows_attach();
         }
         #[cfg(target_os = "macos")]
         {
@@ -120,45 +126,86 @@ impl MonoReader {
         self.mono_root_domain
     }
 
+    /// Whether this process holds CAP_SYS_PTRACE, which grants cross-process
+    /// memory reads without being root.
+    #[cfg(target_os = "linux")]
+    fn has_cap_sys_ptrace() -> bool {
+        // CapEff is a hex bitmask in /proc/self/status; CAP_SYS_PTRACE is bit 19.
+        std::fs::read_to_string("/proc/self/status")
+            .ok()
+            .and_then(|status| {
+                status
+                    .lines()
+                    .find_map(|line| line.strip_prefix("CapEff:"))
+                    .and_then(|caps| u64::from_str_radix(caps.trim(), 16).ok())
+            })
+            .map(|caps| caps & (1 << 19) != 0)
+            .unwrap_or(false)
+    }
+
+    /// Whether the Yama LSM permits attaching to a non-descendant process.
+    ///
+    /// Scope 0 is unrestricted same-uid access. Scope 1 (the common default)
+    /// limits attachment to descendants, and MTGA is never our child, so
+    /// anything above 0 means we cannot read it as an ordinary user.
+    #[cfg(target_os = "linux")]
+    fn yama_allows_attach() -> bool {
+        match std::fs::read_to_string("/proc/sys/kernel/yama/ptrace_scope") {
+            // No Yama at all: classic ptrace rules, same-uid is sufficient.
+            Err(_) => true,
+            Ok(scope) => scope.trim() == "0",
+        }
+    }
+
+    /// Locate the Mono runtime's PE image base in a Wine/Proton-hosted MTGA.
+    ///
+    /// Wine maps the game's DLLs from disk, so `/proc/<pid>/maps` names them
+    /// outright — the same information `Process::module()` hands the Windows
+    /// path. Sweeping memory for the `MZ` magic is not a workable substitute
+    /// here: Wine loads the image up around 0x6ffff_xxxx_xxxx, which is ~3e10
+    /// pages above zero, so a 4KiB-stride walk never arrives.
+    #[cfg(target_os = "linux")]
+    fn mono_module_base(pid: u32) -> Option<usize> {
+        let maps = std::fs::read_to_string(format!("/proc/{}/maps", pid)).ok()?;
+
+        maps.lines()
+            .filter(|line| line.ends_with(constants::MONO_LIBRARY))
+            .filter_map(|line| {
+                // start-end perms file_offset dev inode path
+                let mut fields = line.split_whitespace();
+                let start = fields.next()?.split('-').next()?;
+                let file_offset = fields.nth(1)?;
+
+                Some((
+                    usize::from_str_radix(file_offset, 16).ok()?,
+                    usize::from_str_radix(start, 16).ok()?,
+                ))
+            })
+            // The mapping at file offset 0 is the one carrying the PE header.
+            .min()
+            .map(|(_, start)| start)
+    }
+
     #[cfg(target_os = "linux")]
     pub fn read_mono_root_domain(&mut self) -> usize {
-        // walk trough the memory of the process to find the mono root domain
-        // we use the PE header magic number (MZ) to find the mono library
-
-        let mut addr = 0 as usize;
-        let mut found = false;
-        let mut managed = DataMember::<u16>::new(self.handle);
-
-        println!("Searching for mono library...");
-
-        while !found {
-            let val = unsafe {
-                managed.set_offset(vec![addr]);
-                match managed.read() {
-                    Ok(val) => val,
-                    Err(_e) => 0,
-                }
-            };
-
-            // MZ
-            if val == 0x5a4d {
-                let pe = PEReader::new(&self, addr);
-
-                let mono_root_offset = pe.get_function_offset("mono_get_root_domain");
-
-                match mono_root_offset {
-                    Ok(offset) => {
-                        println!("mono_get_root_domain offset: {:?}", offset);
-                        self.mono_root_domain = addr + offset as usize;
-                        found = true
-                    }
-                    _ => {
-                        // This is not the library we are looking for
-                        // eprintln!("Error: mono_get_root_domain not found");
-                    }
-                }
+        let base = match Self::mono_module_base(self.pid) {
+            Some(base) => base,
+            None => {
+                eprintln!("Mono module not found in process maps");
+                return 0;
             }
-            addr += 4096;
+        };
+
+        let pe = PEReader::new(&self, base);
+
+        match pe.get_function_offset("mono_get_root_domain") {
+            Ok(offset) => {
+                println!("mono_get_root_domain offset: {:?}", offset);
+                self.mono_root_domain = base + offset as usize;
+            }
+            _ => {
+                eprintln!("Error: mono_get_root_domain not found");
+            }
         }
 
         println!("mono_root_domain addr: {:x?}", self.mono_root_domain);
