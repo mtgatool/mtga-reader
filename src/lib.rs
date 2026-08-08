@@ -273,7 +273,12 @@ mod tests {
         assert_eq!(results.is_none(), true);
     }
 
+    /// Needs Arena to be running, so it is not a unit test and cannot pass on a
+    /// build machine. Ignored by default and run deliberately:
+    ///
+    ///     cargo test --lib -- --ignored
     #[test]
+    #[ignore = "requires MTGA to be running"]
     fn test_find_mtga() {
         let process_name = "MTGA";
         let results = MonoReader::find_pid_by_name(&process_name);
