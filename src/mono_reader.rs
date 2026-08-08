@@ -61,7 +61,13 @@ impl MonoReader {
         }
         #[cfg(target_os = "linux")]
         {
-            return sudo::check() == RunningAs::Root;
+            // Root is only one of three ways to qualify for reading another
+            // process' memory. A plain user with CAP_SYS_PTRACE, or any user at
+            // all under a permissive Yama policy, can call process_vm_readv
+            // just fine — reporting "not elevated" to them is a false alarm.
+            return sudo::check() == RunningAs::Root
+                || Self::has_cap_sys_ptrace()
+                || Self::yama_allows_attach();
         }
         #[cfg(target_os = "macos")]
         {
@@ -118,6 +124,37 @@ impl MonoReader {
 
         println!("mono_root_domain addr: {:x?}", self.mono_root_domain);
         self.mono_root_domain
+    }
+
+    /// Whether this process holds CAP_SYS_PTRACE, which grants cross-process
+    /// memory reads without being root.
+    #[cfg(target_os = "linux")]
+    fn has_cap_sys_ptrace() -> bool {
+        // CapEff is a hex bitmask in /proc/self/status; CAP_SYS_PTRACE is bit 19.
+        std::fs::read_to_string("/proc/self/status")
+            .ok()
+            .and_then(|status| {
+                status
+                    .lines()
+                    .find_map(|line| line.strip_prefix("CapEff:"))
+                    .and_then(|caps| u64::from_str_radix(caps.trim(), 16).ok())
+            })
+            .map(|caps| caps & (1 << 19) != 0)
+            .unwrap_or(false)
+    }
+
+    /// Whether the Yama LSM permits attaching to a non-descendant process.
+    ///
+    /// Scope 0 is unrestricted same-uid access. Scope 1 (the common default)
+    /// limits attachment to descendants, and MTGA is never our child, so
+    /// anything above 0 means we cannot read it as an ordinary user.
+    #[cfg(target_os = "linux")]
+    fn yama_allows_attach() -> bool {
+        match std::fs::read_to_string("/proc/sys/kernel/yama/ptrace_scope") {
+            // No Yama at all: classic ptrace rules, same-uid is sufficient.
+            Err(_) => true,
+            Ok(scope) => scope.trim() == "0",
+        }
     }
 
     /// Locate the Mono runtime's PE image base in a Wine/Proton-hosted MTGA.
