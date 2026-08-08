@@ -97,6 +97,37 @@ jobs:
           path: ${{ env.APP_NAME }}.*.node
           if-no-files-found: error
 
+  # The Rust unit tests, which the bindings tests below do not reach.
+  #
+  # Linux because that is where the code under test lives: the Wine maps parser
+  # runs anywhere and is covered by fixtures, but has_cap_sys_ptrace and
+  # yama_allows_attach read a real /proc and can only be exercised here.
+  cargo-test:
+    name: Test - cargo
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: cargo-test-ubuntu-latest
+
+      # --lib only: the binaries do not all link off their own platform, which
+      # is expected rather than a regression (see CLAUDE.md).
+      - name: Run tests
+        run: cargo test --lib
+
   # Test on Windows
   test-windows:
     name: Test - Windows x64 - node@${{ matrix.node }}
