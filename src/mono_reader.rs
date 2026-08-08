@@ -164,10 +164,14 @@ impl MonoReader {
     /// path. Sweeping memory for the `MZ` magic is not a workable substitute
     /// here: Wine loads the image up around 0x6ffff_xxxx_xxxx, which is ~3e10
     /// pages above zero, so a 4KiB-stride walk never arrives.
-    #[cfg(target_os = "linux")]
-    fn mono_module_base(pid: u32) -> Option<usize> {
-        let maps = std::fs::read_to_string(format!("/proc/{}/maps", pid)).ok()?;
-
+    /// Pick the Mono image base out of the text of `/proc/<pid>/maps`.
+    ///
+    /// Split from the file read so it can be tested off Linux: the whole of the
+    /// logic is string parsing, and the only thing the syscall adds is the
+    /// string. Feeding it a captured maps file is a far better test than a VM.
+    ///
+    /// Not gated on the platform for the same reason.
+    pub fn parse_mono_base(maps: &str) -> Option<usize> {
         maps.lines()
             .filter(|line| line.ends_with(constants::MONO_LIBRARY))
             .filter_map(|line| {
@@ -184,6 +188,19 @@ impl MonoReader {
             // The mapping at file offset 0 is the one carrying the PE header.
             .min()
             .map(|(_, start)| start)
+    }
+
+    /// Locate the Mono runtime's PE image base in a Wine/Proton-hosted MTGA.
+    ///
+    /// Wine maps the game's DLLs from disk, so `/proc/<pid>/maps` names them
+    /// outright — the same information `Process::module()` hands the Windows
+    /// path. Sweeping memory for the `MZ` magic is not a workable substitute
+    /// here: Wine loads the image up around 0x6ffff_xxxx_xxxx, which is ~3e10
+    /// pages above zero, so a 4KiB-stride walk never arrives.
+    #[cfg(target_os = "linux")]
+    fn mono_module_base(pid: u32) -> Option<usize> {
+        let maps = std::fs::read_to_string(format!("/proc/{}/maps", pid)).ok()?;
+        Self::parse_mono_base(&maps)
     }
 
     #[cfg(target_os = "linux")]
@@ -582,5 +599,64 @@ impl MonoReader {
     pub fn read_ptr_ptr(&self, addr: usize) -> usize {
         let ptr = self.read_ptr(addr);
         self.read_ptr(ptr)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MonoReader;
+
+    /// A Wine/Proton MTGA, trimmed. The runtime is mapped in several pieces —
+    /// the PE header, then the executable and data sections — and only the one
+    /// at file offset 0 is the image base.
+    const WINE_MAPS: &str = "\
+00400000-00401000 r--p 00000000 08:02 100 /home/u/.steam/steamapps/common/MTGA/MTGA.exe
+7f3c1c000000-7f3c1c021000 rw-p 00000000 00:00 0
+6ffffa010000-6ffffa011000 r--p 00000000 08:02 987 /home/u/.steam/steamapps/common/MTGA/MTGA_Data/MonoBleedingEdge/EmbedRuntime/mono-2.0-bdwgc.dll
+6ffffa011000-6ffffa1a0000 r-xp 00001000 08:02 987 /home/u/.steam/steamapps/common/MTGA/MTGA_Data/MonoBleedingEdge/EmbedRuntime/mono-2.0-bdwgc.dll
+6ffffa1a0000-6ffffa1f0000 r--p 00190000 08:02 987 /home/u/.steam/steamapps/common/MTGA/MTGA_Data/MonoBleedingEdge/EmbedRuntime/mono-2.0-bdwgc.dll
+7ffff7000000-7ffff7028000 r-xp 00000000 08:02 555 /usr/lib/libc.so.6";
+
+    #[test]
+    fn finds_the_image_base_among_several_mappings() {
+        // Not the lowest address and not the first line — the one at file
+        // offset 0, which is where the PE header lives.
+        assert_eq!(MonoReader::parse_mono_base(WINE_MAPS), Some(0x6ffffa010000));
+    }
+
+    /// The rule is "the mapping at file offset 0", not "the lowest address".
+    /// They coincide in a real maps file, which is sorted, so this pins the
+    /// intent against a future rewrite that reaches for the address instead.
+    #[test]
+    fn picks_the_header_mapping_not_the_lowest_address() {
+        let maps = "\
+6ffffa000000-6ffffa010000 r-xp 00001000 08:02 987 /x/mono-2.0-bdwgc.dll
+6ffffa010000-6ffffa011000 r--p 00000000 08:02 987 /x/mono-2.0-bdwgc.dll";
+        assert_eq!(MonoReader::parse_mono_base(maps), Some(0x6ffffa010000));
+    }
+
+    #[test]
+    fn ignores_a_process_without_mono() {
+        let maps = "00400000-00401000 r--p 00000000 08:02 100 /usr/bin/bash\n\
+                    7ffff7000000-7ffff7028000 r-xp 00000000 08:02 555 /usr/lib/libc.so.6";
+        assert_eq!(MonoReader::parse_mono_base(maps), None);
+    }
+
+    #[test]
+    fn survives_an_anonymous_mapping_with_no_path() {
+        // A line with fewer fields must not take the parser down with it.
+        let maps = "7f3c1c000000-7f3c1c021000 rw-p 00000000 00:00 0\n\
+                    6ffffa010000-6ffffa011000 r--p 00000000 08:02 987 /x/mono-2.0-bdwgc.dll";
+        assert_eq!(MonoReader::parse_mono_base(maps), Some(0x6ffffa010000));
+    }
+
+    /// Arena updating while it runs leaves its mappings tagged `(deleted)`, and
+    /// the suffix match then fails. Documents today's behaviour rather than
+    /// endorsing it — the read gives up where the old scan would have hung.
+    #[test]
+    fn a_deleted_mapping_is_not_matched() {
+        let maps = "6ffffa010000-6ffffa011000 r--p 00000000 08:02 987 \
+                    /x/mono-2.0-bdwgc.dll (deleted)";
+        assert_eq!(MonoReader::parse_mono_base(maps), None);
     }
 }
