@@ -1,6 +1,6 @@
 {
   "name": "mtga-reader",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Node.js bindings for reading Magic: The Gathering Arena memory (cross-platform)",
   "main": "index.js",
   "types": "index.d.ts",
