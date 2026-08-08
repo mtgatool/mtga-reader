@@ -15,6 +15,47 @@
 const fs = require("fs");
 const path = require("path");
 
+// Arena's downloaded data, relative to a Windows-style install root.
+const RAW_SUBPATH = path.join("MTGA_Data", "Downloads", "Raw");
+
+// Arena's Steam app id, from appmanifest_2141910.acf.
+const STEAM_APP_ID = "2141910";
+
+// Where Arena lands inside a Wine/Proton prefix's drive_c, by installer.
+const WINE_INSTALL_DIRS = [
+  path.join("Program Files", "Wizards of the Coast", "MTGA"),
+  path.join("Program Files (x86)", "Wizards of the Coast", "MTGA"),
+  path.join("Program Files (x86)", "Steam", "steamapps", "common", "MTGA"),
+  path.join("Program Files", "Epic Games", "MagicTheGathering"),
+];
+
+/**
+ * Immediate subdirectories of `parent`, or [] if it isn't readable.
+ * Used to enumerate Wine bottles and Proton prefixes, which have
+ * user-chosen (CrossOver, Whisky) or per-app-id (Proton) names.
+ */
+function subdirs(parent) {
+  try {
+    return fs
+      .readdirSync(parent, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => path.join(parent, entry.name));
+  } catch {
+    return [];
+  }
+}
+
+/** Every plausible Raw dir inside the given Wine prefixes. */
+function winePrefixCandidates(prefixes) {
+  const dirs = [];
+  for (const prefix of prefixes) {
+    for (const install of WINE_INSTALL_DIRS) {
+      dirs.push(path.join(prefix, "drive_c", install, RAW_SUBPATH));
+    }
+  }
+  return dirs;
+}
+
 /**
  * Find the Raw_CardDatabase_*.mtga file in Arena's install directory.
  * Searches platform-specific paths automatically.
@@ -24,41 +65,69 @@ const path = require("path");
  */
 function findCardDatabasePath(arenaPath) {
   const candidates = [];
+  const home = process.env.HOME || process.env.USERPROFILE || "";
 
   if (arenaPath) {
     // Explicit path: only check there, no platform fallbacks
     candidates.push(path.join(arenaPath, "MTGA_Data", "Downloads", "Raw"));
     candidates.push(path.join(arenaPath, "Downloads", "Raw"));
   } else if (process.platform === "darwin") {
-    // macOS: Unity stores downloads in ~/Library/Application Support/
-    const home = process.env.HOME || "/Users/" + process.env.USER;
+    const appSupport = path.join(home, "Library", "Application Support");
+    // Native builds. Steam is the common case; the standalone client keeps its
+    // downloads next to the Unity player data instead of inside the bundle.
     candidates.push(
-      path.join(home, "Library", "Application Support", "com.wizards.mtga", "Downloads", "Raw"),
+      path.join(appSupport, "Steam", "steamapps", "common", "MTGA", RAW_SUBPATH),
     );
-    // Epic Games install
+    candidates.push(path.join(appSupport, "com.wizards.mtga", "Downloads", "Raw"));
     candidates.push(
       "/Users/Shared/Epic Games/MagicTheGathering/MTGA.app/Contents/Resources/Data/Downloads/Raw",
     );
+    candidates.push(
+      path.join("/Applications", "MTGA.app", "Contents", "Resources", "Data", "Downloads", "Raw"),
+    );
+    // Arena run under Wine on macOS (CrossOver, Whisky) uses the same drive_c
+    // layout as Linux, so these need checking here too rather than only in the
+    // non-darwin branch.
+    candidates.push(
+      ...winePrefixCandidates([
+        ...subdirs(path.join(appSupport, "CrossOver", "Bottles")),
+        ...subdirs(
+          path.join(home, "Library", "Containers", "com.isaacmarovitz.Whisky", "Bottles"),
+        ),
+      ]),
+    );
   } else if (process.platform === "win32") {
-    // Windows: card data in the install dir
+    // Prefer the environment over hardcoded drive letters, since Windows can be
+    // installed somewhere other than C:.
+    const programFiles = process.env.ProgramFiles || "C:\\Program Files";
+    const programFilesX86 = process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
+    candidates.push(path.join(programFiles, "Wizards of the Coast", "MTGA", RAW_SUBPATH));
+    candidates.push(path.join(programFilesX86, "Wizards of the Coast", "MTGA", RAW_SUBPATH));
     candidates.push(
-      "C:\\Program Files\\Wizards of the Coast\\MTGA\\MTGA_Data\\Downloads\\Raw",
+      path.join(programFilesX86, "Steam", "steamapps", "common", "MTGA", RAW_SUBPATH),
     );
-    candidates.push(
-      "C:\\Program Files (x86)\\Wizards of the Coast\\MTGA\\MTGA_Data\\Downloads\\Raw",
-    );
-    // Steam install
-    const steamApps = "C:\\Program Files (x86)\\Steam\\steamapps\\common\\MTGA\\MTGA_Data\\Downloads\\Raw";
-    candidates.push(steamApps);
+    candidates.push(path.join(programFiles, "Epic Games", "MagicTheGathering", RAW_SUBPATH));
   } else {
-    // Linux (Wine/Proton) — check common Wine prefixes
-    const home = process.env.HOME || "";
-    candidates.push(
-      path.join(home, ".wine/drive_c/Program Files/Wizards of the Coast/MTGA/MTGA_Data/Downloads/Raw"),
-    );
-    candidates.push(
-      path.join(home, ".steam/steam/steamapps/compatdata/2141910/pfx/drive_c/Program Files/Wizards of the Coast/MTGA/MTGA_Data/Downloads/Raw"),
-    );
+    // Linux: Arena only runs under Wine/Proton, so everything is inside a prefix.
+    const dataHome = process.env.XDG_DATA_HOME || path.join(home, ".local", "share");
+    const steamRoots = [
+      path.join(home, ".steam", "steam"),
+      path.join(dataHome, "Steam"),
+      // Flatpak Steam
+      path.join(home, ".var", "app", "com.valvesoftware.Steam", ".local", "share", "Steam"),
+    ];
+    const prefixes = [
+      path.join(home, ".wine"),
+      ...subdirs(path.join(dataHome, "wineprefixes")),
+    ];
+    for (const root of steamRoots) {
+      const compatdata = path.join(root, "steamapps", "compatdata");
+      prefixes.push(path.join(compatdata, STEAM_APP_ID, "pfx"));
+      // Fall back to scanning every prefix, in case Arena was added as a
+      // non-Steam game (which gets an arbitrary generated app id).
+      prefixes.push(...subdirs(compatdata).map((dir) => path.join(dir, "pfx")));
+    }
+    candidates.push(...winePrefixCandidates(prefixes));
   }
 
   for (const dir of candidates) {
