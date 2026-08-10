@@ -144,3 +144,7 @@ pub fn read_ranks(process_name: &str) -> Value {
 pub fn read_decks(process_name: &str) -> Value {
     read_with(process_name, q::decks_from)
 }
+
+pub fn read_draft(process_name: &str) -> Value {
+    read_with(process_name, q::draft_from)
+}

@@ -660,6 +660,12 @@ mod windows_backend {
         crate::session::read_decks(process_name)
     }
 
+    pub fn read_draft_impl(_process_name: &str) -> serde_json::Value {
+        // The IL2CPP walk (EventsByInternalName -> DraftPod -> deck manager)
+        // has not been ported to the Mono backend yet.
+        serde_json::json!({ "error": "readDraft is not implemented on this platform yet" })
+    }
+
     pub fn read_ranks_impl(process_name: &str) -> serde_json::Value {
         crate::session::read_ranks(process_name)
     }
@@ -946,6 +952,10 @@ mod macos_backend {
         crate::session_il2cpp::read_decks(process_name)
     }
 
+    pub fn read_draft_impl(process_name: &str) -> serde_json::Value {
+        crate::session_il2cpp::read_draft(process_name)
+    }
+
     pub fn read_ranks_impl(process_name: &str) -> serde_json::Value {
         crate::session_il2cpp::read_ranks(process_name)
     }
@@ -1170,6 +1180,23 @@ pub fn read_decks(process_name: String) -> AsyncTask<JsonTask> {
 
         #[cfg(target_os = "macos")]
         { macos_backend::read_decks_impl(&process_name) }
+
+        #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+        { serde_json::json!({ "error": "Platform not supported" }) }
+    })
+}
+
+/// Read the active draft: event name, draft position, the pack on offer and
+/// the picks so far, in pick order. Works mid-draft; returns an error object
+/// when no draft is running.
+#[napi]
+pub fn read_draft(process_name: String) -> AsyncTask<JsonTask> {
+    JsonTask::spawn(move || {
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        { windows_backend::read_draft_impl(&process_name) }
+
+        #[cfg(target_os = "macos")]
+        { macos_backend::read_draft_impl(&process_name) }
 
         #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
         { serde_json::json!({ "error": "Platform not supported" }) }

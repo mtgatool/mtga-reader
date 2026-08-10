@@ -73,6 +73,12 @@ export declare function readGenericInstance(processName: string, address: number
  * Home screen only — returns an error object during a match.
  */
 export declare function readDecks(processName: string): Promise<unknown>
+/**
+ * Read the active draft: event name, draft position, the pack on offer and
+ * the picks so far, in pick order. Works mid-draft; returns an error object
+ * when no draft is running.
+ */
+export declare function readDraft(processName: string): Promise<unknown>
 /** Read the player's constructed + limited rank info. */
 export declare function readRanks(processName: string): Promise<unknown>
 /** Read the player's account identity (displayName, accountId, personaId, ...). */

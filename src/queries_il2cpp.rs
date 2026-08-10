@@ -387,6 +387,155 @@ pub fn collection_from(rt: &Il2Cpp, root: usize) -> Value {
     json!({ "count": arr.len(), "cards": arr })
 }
 
+/// Read a `List<int>`'s elements (e.g. the current draft pack's grpIds).
+fn read_int_list(rt: &Il2Cpp, list: usize) -> Vec<u64> {
+    let mut out = Vec::new();
+    let (data, elem_size, size, _elem_class) = match rt.list_info(list) {
+        Some(i) => i,
+        None => return out,
+    };
+    if size <= 0 || size > 4096 || elem_size == 0 {
+        return out;
+    }
+    let blob = rt.mem.read_bytes(data, size as usize * elem_size);
+    if blob.len() < size as usize * elem_size {
+        return out;
+    }
+    for i in 0..size as usize {
+        let v = Il2Cpp::decode_number(&blob[i * elem_size..], type_enum::I4)
+            .as_u64()
+            .unwrap_or(0);
+        if v > 0 {
+            out.push(v);
+        }
+    }
+    out
+}
+
+/// Read one draft-deck pile (`_main` / `_sideboard`): a card-pile object whose
+/// `_itemList` holds `{ Card, Quantity }` entries; the grpId lives at
+/// `Card._printing.Record`. Entries are expanded by quantity, preserving the
+/// list's insertion order (which is pick order; a repeated card merges into
+/// its first entry's position).
+fn read_draft_pile(rt: &Il2Cpp, deck: usize, pile: &str) -> Vec<u64> {
+    let mut out = Vec::new();
+    let list = match rt
+        .ref_field(deck, pile)
+        .and_then(|p| rt.ref_field(p, "_itemList"))
+    {
+        Some(l) => l,
+        None => return out,
+    };
+    let (data, elem_size, size, _) = match rt.list_info(list) {
+        Some(i) => i,
+        None => return out,
+    };
+    if size <= 0 || size > 4096 || elem_size != 8 {
+        return out;
+    }
+    for i in 0..size as usize {
+        let item = rt.mem.read_ptr(data + i * elem_size);
+        if !plausible(item) {
+            continue;
+        }
+        let grp = rt
+            .ref_field(item, "<Card>k__BackingField")
+            .and_then(|c| rt.ref_field(c, "_printing"))
+            .and_then(|pr| rt.number_field(pr, "Record"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let qty = rt
+            .number_field(item, "<Quantity>k__BackingField")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(1)
+            .max(1);
+        if grp > 0 {
+            for _ in 0..qty {
+                out.push(grp);
+            }
+        }
+    }
+    out
+}
+
+/// Read the active draft: event name, position, the pack on offer, and the
+/// picks so far (in pick order).
+///
+/// The pod hangs off the event registry —
+/// `EventManager.EventsByInternalName[event].PlayerEvent.DraftPod` — and its
+/// pick history is NOT on the pod (`PickedCards` stays null while drafting).
+/// It lives in the draft scene's deck manager, reachable only through the
+/// pod's `OnPickedCardsUpdated` delegate, whose `m_target` is the live
+/// `DraftContentController`. Every address below is reallocated as the draft
+/// advances, so the walk is repeated from the root on every call.
+pub fn draft_from(rt: &Il2Cpp, root: usize) -> Value {
+    let events = rt
+        .ref_field(root, "<EventManager>k__BackingField")
+        .and_then(|em| rt.ref_field(em, "<EventsByInternalName>k__BackingField"));
+    let events = match events {
+        Some(e) => e,
+        None => return json!({ "error": "could not reach EventManager.EventsByInternalName" }),
+    };
+
+    for (key_addr, _kc, val_addr, _vc) in rt.dict_entries(events, 4096) {
+        let ctx = rt.mem.read_ptr(val_addr);
+        if !plausible(ctx) {
+            continue;
+        }
+        let pod = rt
+            .ref_field(ctx, "PlayerEvent")
+            .and_then(|pe| rt.ref_field(pe, "<DraftPod>k__BackingField"));
+        let pod = match pod {
+            Some(p) => p,
+            None => continue,
+        };
+
+        let event_name = rt
+            .string_field(pod, "<InternalEventName>k__BackingField")
+            .or_else(|| {
+                let key = rt.mem.read_ptr(key_addr);
+                rt.mem.read_managed_string(key)
+            });
+
+        let pack_cards = rt
+            .ref_field(pod, "_currentPackCards")
+            .map(|l| read_int_list(rt, l))
+            .unwrap_or_default();
+
+        // BotDraftPod only; HumanDraftPod keeps its state in
+        // _currentPackInfo/_currentPickInfo instead and reads as null here.
+        let current_pack = rt.number_field(pod, "_currentPack");
+        let current_pick = rt.number_field(pod, "_currentPick");
+
+        let (picked, sideboard) = match rt
+            .ref_field(pod, "<OnPickedCardsUpdated>k__BackingField")
+            .and_then(|d| rt.ref_field(d, "m_target"))
+            .and_then(|t| rt.ref_field(t, "_draftDeckManager"))
+            .and_then(|dm| rt.ref_field(dm, "_deck"))
+        {
+            Some(deck) => (
+                read_draft_pile(rt, deck, "_main"),
+                read_draft_pile(rt, deck, "_sideboard"),
+            ),
+            None => (Vec::new(), Vec::new()),
+        };
+
+        return json!({
+            "eventName": event_name,
+            "draftId": rt.string_field(pod, "<DraftId>k__BackingField"),
+            "draftState": rt.number_field(pod, "<DraftState>k__BackingField"),
+            "currentPack": current_pack,
+            "currentPick": current_pick,
+            "numCardsToPick": rt.number_field(pod, "_numCardsToPick"),
+            "packCards": pack_cards,
+            "pickedCards": picked,
+            "sideboardCards": sideboard,
+        });
+    }
+
+    json!({ "error": "no active draft" })
+}
+
 /// Read the player's constructed + limited rank info.
 pub fn ranks_from(rt: &Il2Cpp, root: usize) -> Value {
     let cri = rt
