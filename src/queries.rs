@@ -455,6 +455,150 @@ pub fn ranks_from(reader: &MonoReader, instance: usize) -> Value {
 // call). The NAPI layer prefers a cached session when init() was called. ----
 
 /// Read the player's account identity (from AccountInformation).
+/// Read a `List<int>`'s elements (e.g. the current draft pack's grpIds).
+fn read_int_list(r: &MonoReader, list_ptr: usize) -> Vec<u32> {
+    let mut out = Vec::new();
+    let items = r.read_ptr(list_ptr + 0x10);
+    let size = r.read_i32(list_ptr + 0x18);
+    if !dvalid(items) || size <= 0 || size > 4096 {
+        return out;
+    }
+    let data = items + 0x20;
+    for i in 0..size {
+        let v = r.read_u32(data + i as usize * 4);
+        if v > 0 {
+            out.push(v);
+        }
+    }
+    out
+}
+
+/// Read one draft-deck pile (`_main` / `_sideboard`): a card-pile object whose
+/// `_itemList` holds `{ Card, Quantity }` entries; the grpId lives at
+/// `Card._printing.Record`. Entries are expanded by quantity, preserving the
+/// list's insertion order (which is pick order; a repeated card merges into
+/// its first entry's position).
+fn read_draft_pile(r: &MonoReader, deck: usize, pile: &str) -> Vec<u32> {
+    let mut out = Vec::new();
+    let list = match ref_field(r, deck, pile).and_then(|p| ref_field(r, p, "_itemList")) {
+        Some(l) => l,
+        None => return out,
+    };
+    let items = r.read_ptr(list + 0x10);
+    let size = r.read_i32(list + 0x18);
+    if !dvalid(items) || size <= 0 || size > 4096 {
+        return out;
+    }
+    let data = items + 0x20;
+    for i in 0..size {
+        let item = r.read_ptr(data + i as usize * 8);
+        if !dvalid(item) {
+            continue;
+        }
+        let grp = ref_field(r, item, "<Card>k__BackingField")
+            .and_then(|c| ref_field(r, c, "_printing"))
+            .and_then(|pr| u32_field(r, pr, "Record"))
+            .unwrap_or(0);
+        let qty = i32_field(r, item, "<Quantity>k__BackingField")
+            .unwrap_or(1)
+            .max(1);
+        if grp > 0 {
+            for _ in 0..qty {
+                out.push(grp);
+            }
+        }
+    }
+    out
+}
+
+/// Read the active draft: event name, position, the pack on offer, and the
+/// picks so far (in pick order). Mirrors the IL2CPP walk in
+/// `queries_il2cpp.rs` — see its comments for why the pick history comes from
+/// the `OnPickedCardsUpdated` delegate's target and why the walk restarts
+/// from the root on every call.
+///
+/// UNTESTED on a live Windows client: written from the IL2CPP-verified paths
+/// (the managed class/field names are identical across backends).
+pub fn draft_from(reader: &MonoReader, instance: usize) -> Value {
+    let events = ref_field(reader, instance, "<EventManager>k__BackingField")
+        .and_then(|em| ref_field(reader, em, "<EventsByInternalName>k__BackingField"));
+    let events = match events {
+        Some(e) => e,
+        None => return json!({ "error": "could not reach EventManager.EventsByInternalName" }),
+    };
+
+    // Dictionary<string, EventContext>: same entry layout as read_string_dict
+    // (hash @0, key ptr @+0x08, value ptr @+0x10, stride 24).
+    let entries = reader.read_ptr(events + 0x18);
+    if !dvalid(entries) {
+        return json!({ "error": "EventsByInternalName._entries not found" });
+    }
+    let cap = reader.read_i32(entries + 0x18);
+    if cap <= 0 || cap > 10_000 {
+        return json!({ "error": format!("implausible entries length {}", cap) });
+    }
+    let data = entries + 0x20;
+
+    for i in 0..cap {
+        let e = data + i as usize * 24;
+        if reader.read_i32(e) < 0 {
+            continue;
+        }
+        let ctx = reader.read_ptr(e + 0x10);
+        if !dvalid(ctx) {
+            continue;
+        }
+        let pod = ref_field(reader, ctx, "PlayerEvent")
+            .and_then(|pe| ref_field(reader, pe, "<DraftPod>k__BackingField"));
+        let pod = match pod {
+            Some(p) => p,
+            None => continue,
+        };
+
+        let event_name = string_field(reader, pod, "<InternalEventName>k__BackingField")
+            .or_else(|| reader.read_mono_string(reader.read_ptr(e + 0x08)));
+
+        let pack_cards = ref_field(reader, pod, "_currentPackCards")
+            .map(|l| read_int_list(reader, l))
+            .unwrap_or_default();
+
+        // The pick history lives in the draft scene; with the screen closed the
+        // delegate is null and the picks are unreadable (the server still has
+        // them — they rebuild when the screen reopens). null, not [], so
+        // callers can tell "no picks yet" from "picks unreachable right now".
+        let (picked, sideboard) = match ref_field(reader, pod, "<OnPickedCardsUpdated>k__BackingField")
+            .and_then(|d| ref_field(reader, d, "m_target"))
+            .and_then(|t| ref_field(reader, t, "_draftDeckManager"))
+            .and_then(|dm| ref_field(reader, dm, "_deck"))
+        {
+            Some(deck) => (
+                Some(read_draft_pile(reader, deck, "_main")),
+                Some(read_draft_pile(reader, deck, "_sideboard")),
+            ),
+            None => (None, None),
+        };
+
+        return json!({
+            "eventName": event_name,
+            "draftId": string_field(reader, pod, "<DraftId>k__BackingField"),
+            "draftState": i32_field(reader, pod, "<DraftState>k__BackingField"),
+            "currentPack": i32_field(reader, pod, "_currentPack"),
+            "currentPick": i32_field(reader, pod, "_currentPick"),
+            "numCardsToPick": i32_field(reader, pod, "_numCardsToPick"),
+            "packCards": pack_cards,
+            "pickedCards": picked,
+            "sideboardCards": sideboard,
+        });
+    }
+
+    json!({ "error": "no active draft" })
+}
+
+/// Read the active draft (one-off, non-session entry point).
+pub fn read_draft(process_name: String) -> Value {
+    with_wrapper(process_name, draft_from)
+}
+
 pub fn read_account(process_name: String) -> Value {
     with_wrapper(process_name, account_from)
 }

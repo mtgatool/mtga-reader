@@ -108,6 +108,10 @@ pub fn read_decks(process_name: &str) -> Value {
     session_or_fresh(process_name, crate::queries::decks_from, crate::read_decks)
 }
 
+pub fn read_draft(process_name: &str) -> Value {
+    session_or_fresh(process_name, crate::queries::draft_from, crate::read_draft)
+}
+
 pub fn read_ranks(process_name: &str) -> Value {
     session_or_fresh(process_name, crate::queries::ranks_from, crate::read_ranks)
 }

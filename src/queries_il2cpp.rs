@@ -507,6 +507,10 @@ pub fn draft_from(rt: &Il2Cpp, root: usize) -> Value {
         let current_pack = rt.number_field(pod, "_currentPack");
         let current_pick = rt.number_field(pod, "_currentPick");
 
+        // The pick history lives in the draft scene; with the screen closed the
+        // delegate is null and the picks are unreadable (the server still has
+        // them — they rebuild when the screen reopens). null, not [], so
+        // callers can tell "no picks yet" from "picks unreachable right now".
         let (picked, sideboard) = match rt
             .ref_field(pod, "<OnPickedCardsUpdated>k__BackingField")
             .and_then(|d| rt.ref_field(d, "m_target"))
@@ -514,10 +518,10 @@ pub fn draft_from(rt: &Il2Cpp, root: usize) -> Value {
             .and_then(|dm| rt.ref_field(dm, "_deck"))
         {
             Some(deck) => (
-                read_draft_pile(rt, deck, "_main"),
-                read_draft_pile(rt, deck, "_sideboard"),
+                Some(read_draft_pile(rt, deck, "_main")),
+                Some(read_draft_pile(rt, deck, "_sideboard")),
             ),
-            None => (Vec::new(), Vec::new()),
+            None => (None, None),
         };
 
         return json!({

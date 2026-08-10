@@ -20,7 +20,9 @@ pub mod api;
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 pub mod queries;
 #[cfg(any(target_os = "windows", target_os = "linux"))]
-pub use queries::{read_account, read_collection, read_decks, read_inventory, read_ranks};
+pub use queries::{
+    read_account, read_collection, read_decks, read_draft, read_inventory, read_ranks,
+};
 
 // Shared cached-reader session for the typed readers — Windows/Mono for now
 #[cfg(any(target_os = "windows", target_os = "linux"))]
