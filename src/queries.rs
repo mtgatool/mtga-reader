@@ -511,15 +511,89 @@ fn read_draft_pile(r: &MonoReader, deck: usize, pile: &str) -> Vec<u32> {
     out
 }
 
+/// The draft-deck piles held by a DraftContentController's deck manager.
+fn picks_from_controller(r: &MonoReader, ctl: usize) -> Option<(Vec<u32>, Vec<u32>)> {
+    let deck = ref_field(r, ctl, "_draftDeckManager").and_then(|dm| ref_field(r, dm, "_deck"))?;
+    Some((
+        read_draft_pile(r, deck, "_main"),
+        read_draft_pile(r, deck, "_sideboard"),
+    ))
+}
+
+/// Build the JSON payload for either pod flavour. Bot pods keep their state
+/// on the pod itself (0-indexed); human pods keep it in `_currentPickInfo`
+/// (1-indexed SelfPack/SelfPick, normalized here) and carry a pick timer.
+fn pod_payload(
+    r: &MonoReader,
+    pod: usize,
+    event_key: Option<String>,
+    picks: Option<(Vec<u32>, Vec<u32>)>,
+) -> Value {
+    let (picked, sideboard) = match picks {
+        Some((m, s)) => (json!(m), json!(s)),
+        None => (Value::Null, Value::Null),
+    };
+
+    if let Some(pick_info) = ref_field(r, pod, "_currentPickInfo") {
+        // HumanDraftPod (Premier/Traditional).
+        let minus_one = |v: Option<i32>| v.map(|n| (n - 1).max(0));
+        return json!({
+            "eventName": string_field(r, pod, "_eventId").or(event_key),
+            "draftId": string_field(r, pod, "<DraftId>k__BackingField"),
+            "draftState": i32_field(r, pod, "<DraftState>k__BackingField"),
+            "currentPack": minus_one(i32_field(r, pick_info, "SelfPack")),
+            "currentPick": minus_one(i32_field(r, pick_info, "SelfPick")),
+            "numCardsToPick": i32_field(r, pick_info, "NumCardsToPick"),
+            "packCards": ref_field(r, pick_info, "PackCards")
+                .map(|l| read_int_list(r, l))
+                .unwrap_or_default(),
+            "pickedCards": picked,
+            "sideboardCards": sideboard,
+            "pickSecondsTotal": f64_field(r, pod, "<PickSecondsTotal>k__BackingField"),
+            "passDirection": i32_field(r, pick_info, "PassDirection"),
+        });
+    }
+
+    // BotDraftPod (Quick Draft).
+    json!({
+        "eventName": string_field(r, pod, "<InternalEventName>k__BackingField").or(event_key),
+        "draftId": string_field(r, pod, "<DraftId>k__BackingField"),
+        "draftState": i32_field(r, pod, "<DraftState>k__BackingField"),
+        "currentPack": i32_field(r, pod, "_currentPack"),
+        "currentPick": i32_field(r, pod, "_currentPick"),
+        "numCardsToPick": i32_field(r, pod, "_numCardsToPick"),
+        "packCards": ref_field(r, pod, "_currentPackCards")
+            .map(|l| read_int_list(r, l))
+            .unwrap_or_default(),
+        "pickedCards": picked,
+        "sideboardCards": sideboard,
+        "pickSecondsTotal": Value::Null,
+        "passDirection": Value::Null,
+    })
+}
+
 /// Read the active draft: event name, position, the pack on offer, and the
 /// picks so far (in pick order). Mirrors the IL2CPP walk in
-/// `queries_il2cpp.rs` — see its comments for why the pick history comes from
-/// the `OnPickedCardsUpdated` delegate's target and why the walk restarts
-/// from the root on every call.
+/// `queries_il2cpp.rs` — see its comments for the discovery order (draft
+/// screen first via SceneLoader.CurrentNavContent, then the event registry
+/// for bot pods with the screen closed) and the null-vs-empty picks contract.
 ///
 /// UNTESTED on a live Windows client: written from the IL2CPP-verified paths
-/// (the managed class/field names are identical across backends).
+/// (the managed class and field names are identical across backends).
 pub fn draft_from(reader: &MonoReader, instance: usize) -> Value {
+    // Draft screen open: controller-first, both pod flavours.
+    if let Some(ctl) = ref_field(reader, instance, "<SceneLoader>k__BackingField")
+        .and_then(|sl| ref_field(reader, sl, "<CurrentNavContent>k__BackingField"))
+    {
+        if let Some(pod) = ref_field(reader, ctl, "_limitedEvent")
+            .and_then(|le| ref_field(reader, le, "<DraftPod>k__BackingField"))
+        {
+            let picks = picks_from_controller(reader, ctl);
+            return pod_payload(reader, pod, None, picks);
+        }
+    }
+
+    // Screen closed: bot pods persist in the event registry.
     let events = ref_field(reader, instance, "<EventManager>k__BackingField")
         .and_then(|em| ref_field(reader, em, "<EventsByInternalName>k__BackingField"));
     let events = match events {
@@ -527,8 +601,8 @@ pub fn draft_from(reader: &MonoReader, instance: usize) -> Value {
         None => return json!({ "error": "could not reach EventManager.EventsByInternalName" }),
     };
 
-    // Dictionary<string, EventContext>: same entry layout as read_string_dict
-    // (hash @0, key ptr @+0x08, value ptr @+0x10, stride 24).
+    // Dictionary<string, EventContext>: hash @0, key ptr @+0x08, value ptr
+    // @+0x10, stride 24 (same layout as read_string_dict).
     let entries = reader.read_ptr(events + 0x18);
     if !dvalid(entries) {
         return json!({ "error": "EventsByInternalName._entries not found" });
@@ -555,40 +629,13 @@ pub fn draft_from(reader: &MonoReader, instance: usize) -> Value {
             None => continue,
         };
 
-        let event_name = string_field(reader, pod, "<InternalEventName>k__BackingField")
-            .or_else(|| reader.read_mono_string(reader.read_ptr(e + 0x08)));
+        let event_key = reader.read_mono_string(reader.read_ptr(e + 0x08));
 
-        let pack_cards = ref_field(reader, pod, "_currentPackCards")
-            .map(|l| read_int_list(reader, l))
-            .unwrap_or_default();
-
-        // The pick history lives in the draft scene; with the screen closed the
-        // delegate is null and the picks are unreadable (the server still has
-        // them — they rebuild when the screen reopens). null, not [], so
-        // callers can tell "no picks yet" from "picks unreachable right now".
-        let (picked, sideboard) = match ref_field(reader, pod, "<OnPickedCardsUpdated>k__BackingField")
+        let picks = ref_field(reader, pod, "<OnPickedCardsUpdated>k__BackingField")
             .and_then(|d| ref_field(reader, d, "m_target"))
-            .and_then(|t| ref_field(reader, t, "_draftDeckManager"))
-            .and_then(|dm| ref_field(reader, dm, "_deck"))
-        {
-            Some(deck) => (
-                Some(read_draft_pile(reader, deck, "_main")),
-                Some(read_draft_pile(reader, deck, "_sideboard")),
-            ),
-            None => (None, None),
-        };
+            .and_then(|t| picks_from_controller(reader, t));
 
-        return json!({
-            "eventName": event_name,
-            "draftId": string_field(reader, pod, "<DraftId>k__BackingField"),
-            "draftState": i32_field(reader, pod, "<DraftState>k__BackingField"),
-            "currentPack": i32_field(reader, pod, "_currentPack"),
-            "currentPick": i32_field(reader, pod, "_currentPick"),
-            "numCardsToPick": i32_field(reader, pod, "_numCardsToPick"),
-            "packCards": pack_cards,
-            "pickedCards": picked,
-            "sideboardCards": sideboard,
-        });
+        return pod_payload(reader, pod, event_key, picks);
     }
 
     json!({ "error": "no active draft" })
