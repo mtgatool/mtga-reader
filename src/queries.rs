@@ -528,6 +528,7 @@ fn pod_payload(
     pod: usize,
     event_key: Option<String>,
     picks: Option<(Vec<u32>, Vec<u32>)>,
+    source: &str,
 ) -> Value {
     let (picked, sideboard) = match picks {
         Some((m, s)) => (json!(m), json!(s)),
@@ -551,6 +552,7 @@ fn pod_payload(
             "sideboardCards": sideboard,
             "pickSecondsTotal": f64_field(r, pod, "<PickSecondsTotal>k__BackingField"),
             "passDirection": i32_field(r, pick_info, "PassDirection"),
+            "source": source,
         });
     }
 
@@ -569,6 +571,7 @@ fn pod_payload(
         "sideboardCards": sideboard,
         "pickSecondsTotal": Value::Null,
         "passDirection": Value::Null,
+        "source": source,
     })
 }
 
@@ -589,7 +592,7 @@ pub fn draft_from(reader: &MonoReader, instance: usize) -> Value {
             .and_then(|le| ref_field(reader, le, "<DraftPod>k__BackingField"))
         {
             let picks = picks_from_controller(reader, ctl);
-            return pod_payload(reader, pod, None, picks);
+            return pod_payload(reader, pod, None, picks, "screen");
         }
     }
 
@@ -635,7 +638,7 @@ pub fn draft_from(reader: &MonoReader, instance: usize) -> Value {
             .and_then(|d| ref_field(reader, d, "m_target"))
             .and_then(|t| picks_from_controller(reader, t));
 
-        return pod_payload(reader, pod, event_key, picks);
+        return pod_payload(reader, pod, event_key, picks, "registry");
     }
 
     json!({ "error": "no active draft" })

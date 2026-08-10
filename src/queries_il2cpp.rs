@@ -477,6 +477,7 @@ fn pod_payload(
     pod: usize,
     event_key: Option<String>,
     picks: Option<(Vec<u64>, Vec<u64>)>,
+    source: &str,
 ) -> Value {
     let (picked, sideboard) = match picks {
         Some((m, s)) => (json!(m), json!(s)),
@@ -503,6 +504,7 @@ fn pod_payload(
             "sideboardCards": sideboard,
             "pickSecondsTotal": rt.number_field(pod, "<PickSecondsTotal>k__BackingField"),
             "passDirection": rt.number_field(pick_info, "PassDirection"),
+            "source": source,
         });
     }
 
@@ -524,6 +526,7 @@ fn pod_payload(
         "sideboardCards": sideboard,
         "pickSecondsTotal": Value::Null,
         "passDirection": Value::Null,
+        "source": source,
     })
 }
 
@@ -536,7 +539,9 @@ fn pod_payload(
 /// never appear in the event registry) and the deck manager with the picks.
 /// With the screen closed, bot pods are still found via
 /// `EventManager.EventsByInternalName`, position intact but picks
-/// unreadable (null) until the screen reopens — the pod's
+/// unreadable (null) until the screen reopens. Registry pods can be STALE:
+/// a finished draft's pod keeps draftState 2 forever, so `source`
+/// ("screen" vs "registry") tells callers how much to trust the read — the pod's
 /// `OnPickedCardsUpdated` delegate target IS the controller, so it dies with
 /// the scene. Every address is reallocated as the draft advances; the walk
 /// restarts from the root on every call.
@@ -551,7 +556,7 @@ pub fn draft_from(rt: &Il2Cpp, root: usize) -> Value {
             .and_then(|le| rt.ref_field(le, "<DraftPod>k__BackingField"))
         {
             let picks = picks_from_controller(rt, ctl);
-            return pod_payload(rt, pod, None, picks);
+            return pod_payload(rt, pod, None, picks, "screen");
         }
     }
 
@@ -589,7 +594,7 @@ pub fn draft_from(rt: &Il2Cpp, root: usize) -> Value {
             .and_then(|d| rt.ref_field(d, "m_target"))
             .and_then(|t| picks_from_controller(rt, t));
 
-        return pod_payload(rt, pod, event_key, picks);
+        return pod_payload(rt, pod, event_key, picks, "registry");
     }
 
     json!({ "error": "no active draft" })
