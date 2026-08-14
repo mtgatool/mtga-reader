@@ -32,7 +32,7 @@ export interface InstanceField {
   name: string
   typeName: string
   isStatic: boolean
-  value: any
+  value: unknown
 }
 export interface InstanceData {
   className: string
@@ -41,29 +41,136 @@ export interface InstanceData {
   fields: Array<InstanceField>
 }
 export interface DictionaryEntry {
-  key: any
-  value: any
+  key: unknown
+  value: unknown
 }
 export interface DictionaryData {
   count: number
   entries: Array<DictionaryEntry>
 }
+/**
+ * Every reader resolves with its payload on success and `{ error }` when the
+ * read cannot be done (wrong scene, process gone, layout drift) — errors are
+ * a resolved value, not a rejection.
+ */
+export interface ReaderError {
+  error?: string
+}
+export interface ReaderCardCount {
+  grpId: number
+  qty: number
+}
+export interface ReaderCollection {
+  count: number
+  cards: Array<ReaderCardCount>
+}
+export interface ReaderAccount {
+  displayName?: string
+  accountId?: string
+  personaId?: string
+  gameId?: string
+  email?: string
+  externalId?: string
+  countryCode?: string
+  accessToken?: string
+}
+export interface ReaderWildcards {
+  common?: number
+  uncommon?: number
+  rare?: number
+  mythic?: number
+}
+export interface ReaderInventory {
+  gems?: number
+  gold?: number
+  wildcards: ReaderWildcards
+  wcTrackPosition?: number
+  vaultProgress?: number
+  basicLandSet?: string
+  latestBasicLandSet?: string
+}
+export interface ReaderRank {
+  seasonOrdinal?: number
+  /** Rank tier name, derived from classValue ("Bronze", "Mythic", ...). */
+  class: string
+  classValue: number
+  level?: number
+  step?: number
+  wins?: number
+  losses?: number
+  draws?: number
+  /** Mythic percentile; the game stores it as text or number by build. */
+  percentile?: string | number | null
+  leaderboardPlace?: number
+}
+export interface ReaderRanks {
+  playerId?: string
+  constructed: ReaderRank
+  limited: ReaderRank
+}
+export interface ReaderDeckPile {
+  pile: number
+  /**
+   * "Main", "Sideboard", "CommandZone", "Companions" — or the raw pile key
+   * when a new pile kind appears.
+   */
+  pileName: string
+  total: number
+  cards: Array<ReaderCardCount>
+}
+export interface ReaderDeck {
+  name?: string
+  deckId?: string
+  description?: string
+  tileId?: number
+  attributes: Record<string, string>
+  piles: Array<ReaderDeckPile>
+}
+export interface ReaderDecks {
+  count: number
+  decks: Array<ReaderDeck>
+}
+export interface ReaderDraft {
+  eventName?: string
+  draftId?: string
+  draftState?: number
+  /** 0-indexed for both draft flavours (human pods are normalized). */
+  currentPack?: number
+  currentPick?: number
+  numCardsToPick?: number
+  packCards?: Array<number>
+  /**
+   * Picks in pick order, expanded by quantity. null (not []) while the
+   * draft screen is closed — position and pack stay valid.
+   */
+  pickedCards?: Array<number> | null
+  sideboardCards?: Array<number> | null
+  /** Human drafts only; null on bot drafts. */
+  pickSecondsTotal?: number | null
+  passDirection?: number | null
+  /**
+   * "screen" when the draft screen itself held the pod (a live read);
+   * "registry" when it came from the event registry, where a finished
+   * draft's pod lingers with draftState still 2.
+   */
+  source?: "screen" | "registry" | null
+}
 export declare function isAdmin(): boolean
 /** Async: process enumeration runs on the threadpool, resolves to a boolean. */
-export declare function findProcess(processName: string): Promise<unknown>
+export declare function findProcess(processName: string): Promise<boolean>
 /**
  * Async: session init scans the game's loaded assemblies (the expensive,
  * multi-second step) — it runs on the threadpool and resolves when cached.
  */
-export declare function init(processName: string): Promise<unknown>
+export declare function init(processName: string): Promise<boolean>
 export declare function close(): boolean
 export declare function isInitialized(): boolean
 export declare function getAssemblies(): Array<string>
 export declare function getAssemblyClasses(assemblyName: string): Array<ClassInfo>
 export declare function getClassDetails(assemblyName: string, className: string): ClassDetails
 export declare function getInstance(address: number): InstanceData
-export declare function getInstanceField(address: number, fieldName: string): any
-export declare function getStaticField(classAddress: number, fieldName: string): any
+export declare function getInstanceField(address: number, fieldName: string): unknown
+export declare function getStaticField(classAddress: number, fieldName: string): unknown
 export declare function getDictionary(address: number): DictionaryData
 export declare function readData(processName: string, fields: Array<string>): Promise<unknown>
 export declare function readClass(processName: string, address: number): Promise<unknown>
@@ -72,18 +179,18 @@ export declare function readGenericInstance(processName: string, address: number
  * Read all saved decks (name, deckId, format/attributes, per-pile card lists).
  * Home screen only — returns an error object during a match.
  */
-export declare function readDecks(processName: string): Promise<unknown>
+export declare function readDecks(processName: string): Promise<ReaderDecks & ReaderError>
 /**
  * Read the active draft: event name, draft position, the pack on offer and
  * the picks so far, in pick order. Works mid-draft; returns an error object
  * when no draft is running.
  */
-export declare function readDraft(processName: string): Promise<unknown>
+export declare function readDraft(processName: string): Promise<ReaderDraft & ReaderError>
 /** Read the player's constructed + limited rank info. */
-export declare function readRanks(processName: string): Promise<unknown>
+export declare function readRanks(processName: string): Promise<ReaderRanks & ReaderError>
 /** Read the player's account identity (displayName, accountId, personaId, ...). */
-export declare function readAccount(processName: string): Promise<unknown>
+export declare function readAccount(processName: string): Promise<ReaderAccount & ReaderError>
 /** Read the player's owned-card collection (grpId -> quantity). */
-export declare function readCollection(processName: string): Promise<unknown>
+export declare function readCollection(processName: string): Promise<ReaderCollection & ReaderError>
 /** Read the player's wallet/inventory (gems, gold, wildcards, vault, ...). */
-export declare function readInventory(processName: string): Promise<unknown>
+export declare function readInventory(processName: string): Promise<ReaderInventory & ReaderError>

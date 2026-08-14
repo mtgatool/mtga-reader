@@ -134,6 +134,7 @@ pub struct InstanceField {
     pub name: String,
     pub type_name: String,
     pub is_static: bool,
+    #[napi(ts_type = "unknown")]
     pub value: serde_json::Value,
 }
 
@@ -149,7 +150,9 @@ pub struct InstanceData {
 #[derive(Serialize, Deserialize)]
 #[napi(object)]
 pub struct DictionaryEntry {
+    #[napi(ts_type = "unknown")]
     pub key: serde_json::Value,
+    #[napi(ts_type = "unknown")]
     pub value: serde_json::Value,
 }
 
@@ -158,6 +161,146 @@ pub struct DictionaryEntry {
 pub struct DictionaryData {
     pub count: i32,
     pub entries: Vec<DictionaryEntry>,
+}
+
+// ============================================================================
+// Reader payload shapes
+//
+// The readers build their JSON dynamically (serde_json), which NAPI-RS can
+// only type as `unknown` — so the shapes are declared here by hand, emitted
+// into index.d.ts, and pinned to each reader with `ts_return_type`. They are
+// type declarations only: nothing constructs them at runtime, and they must
+// be kept in step with what queries*.rs actually serializes.
+// ============================================================================
+
+/// Every reader resolves with its payload on success and `{ error }` when the
+/// read cannot be done (wrong scene, process gone, layout drift) — errors are
+/// a resolved value, not a rejection.
+#[napi(object)]
+pub struct ReaderError {
+    pub error: Option<String>,
+}
+
+#[napi(object)]
+pub struct ReaderCardCount {
+    pub grp_id: i64,
+    pub qty: i64,
+}
+
+#[napi(object)]
+pub struct ReaderCollection {
+    pub count: i64,
+    pub cards: Vec<ReaderCardCount>,
+}
+
+#[napi(object)]
+pub struct ReaderAccount {
+    pub display_name: Option<String>,
+    pub account_id: Option<String>,
+    pub persona_id: Option<String>,
+    pub game_id: Option<String>,
+    pub email: Option<String>,
+    pub external_id: Option<String>,
+    pub country_code: Option<String>,
+    pub access_token: Option<String>,
+}
+
+#[napi(object)]
+pub struct ReaderWildcards {
+    pub common: Option<i64>,
+    pub uncommon: Option<i64>,
+    pub rare: Option<i64>,
+    pub mythic: Option<i64>,
+}
+
+#[napi(object)]
+pub struct ReaderInventory {
+    pub gems: Option<i64>,
+    pub gold: Option<i64>,
+    pub wildcards: ReaderWildcards,
+    pub wc_track_position: Option<i64>,
+    pub vault_progress: Option<i64>,
+    pub basic_land_set: Option<String>,
+    pub latest_basic_land_set: Option<String>,
+}
+
+#[napi(object)]
+pub struct ReaderRank {
+    pub season_ordinal: Option<i64>,
+    /// Rank tier name, derived from classValue ("Bronze", "Mythic", ...).
+    #[napi(js_name = "class")]
+    pub class_name: String,
+    pub class_value: i64,
+    pub level: Option<i64>,
+    pub step: Option<i64>,
+    pub wins: Option<i64>,
+    pub losses: Option<i64>,
+    pub draws: Option<i64>,
+    /// Mythic percentile; the game stores it as text or number by build.
+    #[napi(ts_type = "string | number | null")]
+    pub percentile: Option<String>,
+    pub leaderboard_place: Option<i64>,
+}
+
+#[napi(object)]
+pub struct ReaderRanks {
+    pub player_id: Option<String>,
+    pub constructed: ReaderRank,
+    pub limited: ReaderRank,
+}
+
+#[napi(object)]
+pub struct ReaderDeckPile {
+    pub pile: i64,
+    /// "Main", "Sideboard", "CommandZone", "Companions" — or the raw pile key
+    /// when a new pile kind appears.
+    pub pile_name: String,
+    pub total: i64,
+    pub cards: Vec<ReaderCardCount>,
+}
+
+#[napi(object)]
+pub struct ReaderDeck {
+    pub name: Option<String>,
+    pub deck_id: Option<String>,
+    pub description: Option<String>,
+    pub tile_id: Option<i64>,
+    pub attributes: std::collections::HashMap<String, String>,
+    pub piles: Vec<ReaderDeckPile>,
+}
+
+#[napi(object)]
+pub struct ReaderDecks {
+    pub count: i64,
+    pub decks: Vec<ReaderDeck>,
+}
+
+#[napi(object)]
+pub struct ReaderDraft {
+    pub event_name: Option<String>,
+    pub draft_id: Option<String>,
+    pub draft_state: Option<i64>,
+    /// 0-indexed for both draft flavours (human pods are normalized).
+    pub current_pack: Option<i64>,
+    pub current_pick: Option<i64>,
+    pub num_cards_to_pick: Option<i64>,
+    pub pack_cards: Option<Vec<i64>>,
+    /// Picks in pick order, expanded by quantity. null (not []) while the
+    /// draft screen is closed — position and pack stay valid.
+    #[napi(ts_type = "Array<number> | null")]
+    pub picked_cards: Option<Vec<i64>>,
+    #[napi(ts_type = "Array<number> | null")]
+    pub sideboard_cards: Option<Vec<i64>>,
+    /// Human drafts only; null on bot drafts.
+    #[napi(ts_type = "number | null")]
+    pub pick_seconds_total: Option<i64>,
+    #[napi(ts_type = "number | null")]
+    pub pass_direction: Option<i64>,
+    /// "screen" when the draft screen itself held the pod (a live read);
+    /// "registry" when it came from the event registry, where a finished
+    /// draft's pod lingers with draftState still 2.
+    #[napi(ts_type = "\"screen\" | \"registry\" | null")]
+    pub source: Option<String>,
 }
 
 // ============================================================================
@@ -988,7 +1131,7 @@ pub fn is_admin() -> bool {
 }
 
 /// Async: process enumeration runs on the threadpool, resolves to a boolean.
-#[napi]
+#[napi(ts_return_type = "Promise<boolean>")]
 pub fn find_process(process_name: String) -> AsyncTask<BoolTask> {
     BoolTask::spawn(move || {
         #[cfg(any(target_os = "windows", target_os = "linux"))]
@@ -1004,7 +1147,7 @@ pub fn find_process(process_name: String) -> AsyncTask<BoolTask> {
 
 /// Async: session init scans the game's loaded assemblies (the expensive,
 /// multi-second step) — it runs on the threadpool and resolves when cached.
-#[napi]
+#[napi(ts_return_type = "Promise<boolean>")]
 pub fn init(process_name: String) -> AsyncTask<BoolTask> {
     BoolTask::spawn(move || {
         #[cfg(any(target_os = "windows", target_os = "linux"))]
@@ -1090,7 +1233,7 @@ pub fn get_instance(address: i64) -> Result<InstanceData> {
     { Err(Error::from_reason("Platform not supported")) }
 }
 
-#[napi]
+#[napi(ts_return_type = "unknown")]
 pub fn get_instance_field(address: i64, field_name: String) -> Result<serde_json::Value> {
     #[cfg(any(target_os = "windows", target_os = "linux"))]
     { windows_backend::get_instance_field_impl(address, &field_name) }
@@ -1102,7 +1245,7 @@ pub fn get_instance_field(address: i64, field_name: String) -> Result<serde_json
     { Err(Error::from_reason("Platform not supported")) }
 }
 
-#[napi]
+#[napi(ts_return_type = "unknown")]
 pub fn get_static_field(class_address: i64, field_name: String) -> Result<serde_json::Value> {
     #[cfg(any(target_os = "windows", target_os = "linux"))]
     { windows_backend::get_static_field_impl(class_address, &field_name) }
@@ -1126,7 +1269,7 @@ pub fn get_dictionary(address: i64) -> Result<DictionaryData> {
     { Err(Error::from_reason("Platform not supported")) }
 }
 
-#[napi]
+#[napi(ts_return_type = "Promise<unknown>")]
 pub fn read_data(process_name: String, fields: Vec<String>) -> AsyncTask<JsonTask> {
     JsonTask::spawn(move || {
         #[cfg(any(target_os = "windows", target_os = "linux"))]
@@ -1170,7 +1313,7 @@ pub fn read_generic_instance(process_name: String, address: i64) -> AsyncTask<Js
 
 /// Read all saved decks (name, deckId, format/attributes, per-pile card lists).
 /// Home screen only — returns an error object during a match.
-#[napi]
+#[napi(ts_return_type = "Promise<ReaderDecks & ReaderError>")]
 pub fn read_decks(process_name: String) -> AsyncTask<JsonTask> {
     JsonTask::spawn(move || {
         #[cfg(any(target_os = "windows", target_os = "linux"))]
@@ -1187,7 +1330,7 @@ pub fn read_decks(process_name: String) -> AsyncTask<JsonTask> {
 /// Read the active draft: event name, draft position, the pack on offer and
 /// the picks so far, in pick order. Works mid-draft; returns an error object
 /// when no draft is running.
-#[napi]
+#[napi(ts_return_type = "Promise<ReaderDraft & ReaderError>")]
 pub fn read_draft(process_name: String) -> AsyncTask<JsonTask> {
     JsonTask::spawn(move || {
         #[cfg(any(target_os = "windows", target_os = "linux"))]
@@ -1202,7 +1345,7 @@ pub fn read_draft(process_name: String) -> AsyncTask<JsonTask> {
 }
 
 /// Read the player's constructed + limited rank info.
-#[napi]
+#[napi(ts_return_type = "Promise<ReaderRanks & ReaderError>")]
 pub fn read_ranks(process_name: String) -> AsyncTask<JsonTask> {
     JsonTask::spawn(move || {
         #[cfg(any(target_os = "windows", target_os = "linux"))]
@@ -1217,7 +1360,7 @@ pub fn read_ranks(process_name: String) -> AsyncTask<JsonTask> {
 }
 
 /// Read the player's account identity (displayName, accountId, personaId, ...).
-#[napi]
+#[napi(ts_return_type = "Promise<ReaderAccount & ReaderError>")]
 pub fn read_account(process_name: String) -> AsyncTask<JsonTask> {
     JsonTask::spawn(move || {
         #[cfg(any(target_os = "windows", target_os = "linux"))]
@@ -1232,7 +1375,7 @@ pub fn read_account(process_name: String) -> AsyncTask<JsonTask> {
 }
 
 /// Read the player's owned-card collection (grpId -> quantity).
-#[napi]
+#[napi(ts_return_type = "Promise<ReaderCollection & ReaderError>")]
 pub fn read_collection(process_name: String) -> AsyncTask<JsonTask> {
     JsonTask::spawn(move || {
         #[cfg(any(target_os = "windows", target_os = "linux"))]
@@ -1247,7 +1390,7 @@ pub fn read_collection(process_name: String) -> AsyncTask<JsonTask> {
 }
 
 /// Read the player's wallet/inventory (gems, gold, wildcards, vault, ...).
-#[napi]
+#[napi(ts_return_type = "Promise<ReaderInventory & ReaderError>")]
 pub fn read_inventory(process_name: String) -> AsyncTask<JsonTask> {
     JsonTask::spawn(move || {
         #[cfg(any(target_os = "windows", target_os = "linux"))]
