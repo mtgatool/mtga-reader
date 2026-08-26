@@ -255,17 +255,23 @@ fn pile_name(key: i32) -> &'static str {
 }
 
 /// RankingClassType (Wizards.Mtga.FrontDoorModels) value -> name.
+/// Name for a `Wizards.Mtga.FrontDoorModels.RankingClassType` value.
+///
+/// The values are NOT the declaration order: `None` is -1, so the ladder starts
+/// at `Spark` = 0 and `Bronze` = 1. Taken from the enum's metadata in
+/// `MTGA_Data/Managed/SharedClientCore.dll`; const values live in assembly
+/// metadata, so they can't be read back out of process memory.
 fn rank_class_name(v: i64) -> &'static str {
     match v {
-        0 => "None",
-        1 => "Spark",
-        2 => "Bronze",
-        3 => "Silver",
-        4 => "Gold",
-        5 => "Platinum",
-        6 => "Diamond",
-        7 => "Master",
-        8 => "Mythic",
+        -1 => "None",
+        0 => "Spark",
+        1 => "Bronze",
+        2 => "Silver",
+        3 => "Gold",
+        4 => "Platinum",
+        5 => "Diamond",
+        6 => "Master",
+        7 => "Mythic",
         _ => "Unknown",
     }
 }
@@ -616,7 +622,7 @@ pub fn ranks_from(rt: &Il2Cpp, root: usize) -> Value {
         let class_v = rt
             .number_field(cri, &format!("{prefix}Class"))
             .and_then(|v| v.as_i64())
-            .unwrap_or(0);
+            .unwrap_or(-1);
         json!({
             "seasonOrdinal": rt.number_field(cri, &format!("{prefix}SeasonOrdinal")),
             "class": rank_class_name(class_v),
