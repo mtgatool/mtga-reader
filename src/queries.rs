@@ -55,6 +55,20 @@ fn string_field(r: &MonoReader, obj: usize, name: &str) -> Option<String> {
     r.read_mono_string(r.read_ptr(addr))
 }
 
+/// A numeric field read by its declared type code, so a width change in a game
+/// update surfaces as the right number instead of a silently garbled one.
+/// `percentile` is an R4 on current builds.
+fn number_field(r: &MonoReader, obj: usize, name: &str) -> Option<Value> {
+    const R4: u32 = 0x0c;
+    const R8: u32 = 0x0d;
+    let (addr, code) = field_addr(r, obj, name)?;
+    match code {
+        R4 => Some(json!(r.read_f32(addr))),
+        R8 => Some(json!(r.read_f64(addr))),
+        _ => Some(json!(r.read_i32(addr))),
+    }
+}
+
 fn u32_field(r: &MonoReader, obj: usize, name: &str) -> Option<u32> {
     field_addr(r, obj, name).map(|(addr, _)| r.read_u32(addr))
 }
@@ -439,7 +453,7 @@ pub fn ranks_from(reader: &MonoReader, instance: usize) -> Value {
             "wins": i32_field(reader, cri, &format!("{}MatchesWon", prefix)),
             "losses": i32_field(reader, cri, &format!("{}MatchesLost", prefix)),
             "draws": i32_field(reader, cri, &format!("{}MatchesDrawn", prefix)),
-            "percentile": string_field(reader, cri, &format!("{}Percentile", prefix)),
+            "percentile": number_field(reader, cri, &format!("{}Percentile", prefix)),
             "leaderboardPlace": i32_field(reader, cri, &format!("{}LeaderboardPlace", prefix)),
         })
     };
