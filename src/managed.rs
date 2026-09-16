@@ -5,6 +5,17 @@ use crate::type_info::TypeInfo;
 use crate::{constants, MonoReader};
 use std::cmp;
 
+/// A float as JSON text. `f32::to_string` is valid JSON for finite values but
+/// emits `NaN` / `inf` otherwise, which breaks the whole document.
+pub fn json_number<F: Into<f64>>(v: F) -> String {
+    let v: f64 = v.into();
+    if v.is_finite() {
+        v.to_string()
+    } else {
+        "null".to_string()
+    }
+}
+
 pub struct Managed<'a> {
     reader: &'a MonoReader,
     pub addr: usize,
@@ -37,12 +48,12 @@ impl<'a> Managed<'a> {
         self.reader.read_u32(self.addr)
     }
 
-    pub fn read_r4(&self) -> i32 {
-        self.reader.read_i32(self.addr)
+    pub fn read_r4(&self) -> f32 {
+        self.reader.read_f32(self.addr)
     }
 
-    pub fn read_r8(&self) -> i64 {
-        self.reader.read_i64(self.addr)
+    pub fn read_r8(&self) -> f64 {
+        self.reader.read_f64(self.addr)
     }
 
     // read_i
@@ -208,8 +219,8 @@ impl<'a> Managed<'a> {
                         let var = match gen_type.clone().code() {
                             TypeCode::I4 => managed_var.read_i4().to_string(),
                             TypeCode::U4 => managed_var.read_u4().to_string(),
-                            TypeCode::R4 => managed_var.read_r4().to_string(),
-                            TypeCode::R8 => managed_var.read_r8().to_string(),
+                            TypeCode::R4 => json_number(managed_var.read_r4()),
+                            TypeCode::R8 => json_number(managed_var.read_r8()),
                             TypeCode::I => managed_var.read_i4().to_string(),
                             TypeCode::U => managed_var.read_u4().to_string(),
                             TypeCode::I2 => managed_var.read_i2().to_string(),
@@ -285,5 +296,25 @@ fn get_type_size(type_code: TypeCode) -> usize {
         TypeCode::PINNED => 4,
         TypeCode::ENUM => 4,
         _ => 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::json_number;
+
+    #[test]
+    fn finite_floats_are_json_numbers() {
+        // The raw bits the old reader emitted as the integer 1119965110.
+        assert_eq!(json_number(f32::from_bits(0x42c1_4fb6)), "96.65568542480469");
+        assert_eq!(json_number(0.0_f32), "0");
+        assert_eq!(json_number(-1.5_f64), "-1.5");
+    }
+
+    #[test]
+    fn non_finite_floats_become_null() {
+        assert_eq!(json_number(f32::NAN), "null");
+        assert_eq!(json_number(f64::INFINITY), "null");
+        assert_eq!(json_number(f32::NEG_INFINITY), "null");
     }
 }
