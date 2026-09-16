@@ -1,5 +1,5 @@
 use crate::field_definition::FieldDefinition;
-use crate::managed::Managed;
+use crate::managed::{json_number, Managed};
 use crate::mono_class_kind::{match_class_kind, MonoClassKind};
 use crate::{constants, MonoReader, TypeCode, TypeInfo};
 
@@ -260,8 +260,8 @@ impl fmt::Display for TypeDefinition<'_> {
                     TypeCode::BOOLEAN => managed.read_boolean().to_string(),
                     TypeCode::U4 => managed.read_u4().to_string(),
                     TypeCode::U => managed.read_u4().to_string(),
-                    TypeCode::R4 => managed.read_r4().to_string(),
-                    TypeCode::R8 => managed.read_r8().to_string(),
+                    TypeCode::R4 => json_number(managed.read_r4()),
+                    TypeCode::R8 => json_number(managed.read_r8()),
                     TypeCode::I4 => managed.read_i4().to_string(),
                     TypeCode::I => managed.read_i4().to_string(),
                     TypeCode::I2 => managed.read_i2().to_string(),
